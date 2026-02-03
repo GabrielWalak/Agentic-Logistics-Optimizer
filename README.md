@@ -1,76 +1,135 @@
 # 🤖 AgenticAI - Multi-Agent Logistics Decision System
 
-System inteligencji decyzyjnej łączący predykcje ML z architekturą Multi-Agent LLM do autonomicznej analizy ryzyka opóźnień dostaw e-commerce.
+A Decision Intelligence system combining ML predictions with Multi-Agent LLM architecture for autonomous e-commerce delivery risk analysis.
 
 ---
 
-## 🎯 Co robi ten system?
+## 🎯 What does this system do?
 
-System przyjmuje dane o zamówieniu (waga, dystans, opóźnienie płatności, itp.) i:
+The system takes order data (weight, distance, payment lag, etc.) and:
 
-1. **Predykcja ML** - Model XGBoost przewiduje czas dostawy
-2. **Kontekst RAG** - ChromaDB wyszukuje relevantne zasady logistyczne
-3. **Analiza Agentów** - 4 wyspecjalizowane agenty AI analizują scenariusz równolegle
-4. **Decyzja** - System generuje rekomendacje: voucher, zmiana przewoźnika, komunikacja z klientem
+1. **ML Prediction** - XGBoost model predicts delivery time
+2. **RAG Context** - ChromaDB retrieves relevant logistics rules
+3. **Agent Analysis** - 4 specialized AI agents analyze the scenario in parallel
+4. **Decision** - System generates recommendations: voucher, carrier upgrade, customer communication
 
 ---
 
-## 🧠 Architektura Multi-Agent
+## 📐 System Architecture
 
-System wykorzystuje 4 wyspecjalizowane agenty LLM (Mistral 7B via Ollama):
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         OLIST AGENTIC AI SYSTEM                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ┌──────────────┐    ┌──────────────┐    ┌──────────────────────────────┐  │
+│  │   INPUT      │    │   XGBOOST    │    │     CHROMADB RAG             │  │
+│  │  Delivery    │───▶│   Model      │───▶│  ┌────────────────────────┐  │  │
+│  │  Scenario    │    │              │    │  │ Semantic Search        │  │  │
+│  └──────────────┘    └──────────────┘    │  │ all-MiniLM-L6-v2       │  │  │
+│                             │            │  │ 39 Knowledge Chunks    │  │  │
+│                             ▼            │  └────────────────────────┘  │  │
+│                      Predicted Days      └──────────────┬───────────────┘  │
+│                             │                           │                  │
+│                             ▼                           ▼                  │
+│  ┌──────────────────────────────────────────────────────────────────────┐  │
+│  │                    MULTI-AGENT ORCHESTRATION                         │  │
+│  │  ┌─────────────────────────────────────────────────────────────────┐ │  │
+│  │  │                    Ollama + Mistral 7B                          │ │  │
+│  │  │                   (Local LLM Inference)                         │ │  │
+│  │  └─────────────────────────────────────────────────────────────────┘ │  │
+│  │                              │                                       │  │
+│  │        ┌─────────────────────┼─────────────────────┐                 │  │
+│  │        ▼                     ▼                     ▼                 │  │
+│  │  ┌───────────┐        ┌───────────┐        ┌───────────┐             │  │
+│  │  │   RISK    │        │  CARRIER  │        │ RECOVERY  │             │  │
+│  │  │   AGENT   │        │   AGENT   │        │   AGENT   │             │  │
+│  │  │           │        │           │        │           │             │  │
+│  │  │ • Score   │        │ • Upgrade │        │ • Voucher │             │  │
+│  │  │ • Factors │        │ • Cost    │        │ • Timing  │             │  │
+│  │  │ • Priority│        │ • ROI     │        │ • Message │             │  │
+│  │  └─────┬─────┘        └─────┬─────┘        └─────┬─────┘             │  │
+│  │        │                    │                    │                   │  │
+│  │        └────────────────────┼────────────────────┘                   │  │
+│  │                             ▼                                        │  │
+│  │                    ┌─────────────────┐                               │  │
+│  │                    │  ORCHESTRATOR   │                               │  │
+│  │                    │     AGENT       │                               │  │
+│  │                    │                 │                               │  │
+│  │                    │ Executive       │                               │  │
+│  │                    │ Summary +       │                               │  │
+│  │                    │ Confidence      │                               │  │
+│  │                    └─────────────────┘                               │  │
+│  └──────────────────────────────────────────────────────────────────────┘  │
+│                              │                                             │
+│                              ▼                                             │
+│  ┌──────────────────────────────────────────────────────────────────────┐  │
+│  │                      INTEGRATED DECISION                             │  │
+│  │  • Risk Level (HIGH/MODERATE/LOW)    • Carrier Recommendation        │  │
+│  │  • Voucher Code (DELAY15/DELAY50)    • Customer Communication        │  │
+│  │  • ROI Analysis                      • Confidence Score              │  │
+│  └──────────────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
 
-| Agent | Odpowiedzialność |
-|-------|------------------|
-| **Risk Agent** | Ocena ryzyka (0-100), identyfikacja czynników ryzyka |
-| **Carrier Agent** | Rekomendacja przewoźnika, analiza ROI upgrade'u |
-| **Recovery Agent** | Strategia retencji klienta, kody voucherów |
-| **Orchestrator** | Synteza wszystkich analiz, podsumowanie wykonawcze |
+---
+
+## 🧠 Multi-Agent Architecture
+
+The system uses 4 specialized LLM agents (Mistral 7B via Ollama):
+
+| Agent | Responsibility |
+|-------|----------------|
+| **Risk Agent** | Risk assessment (0-100), risk factor identification |
+| **Carrier Agent** | Carrier recommendation, upgrade ROI analysis |
+| **Recovery Agent** | Customer retention strategy, voucher codes |
+| **Orchestrator** | Synthesis of all analyses, executive summary |
 
 ---
 
 ## 🛠️ Tech Stack
 
-- **Python 3.10+** - Język programowania
-- **Ollama + Mistral 7B** - Lokalny LLM (bez API keys)
-- **ChromaDB** - Baza wektorowa dla RAG
-- **XGBoost** - Model predykcji czasu dostawy
-- **Pydantic** - Walidacja typów odpowiedzi LLM
-- **Redis** - Cache dla przyspieszenia (opcjonalnie)
-- **Rich** - Interfejs CLI
+- **Python 3.10+**
+- **Ollama + Mistral 7B** - Local LLM (no API keys needed)
+- **ChromaDB** - Vector database for RAG
+- **XGBoost** - Delivery time prediction model (R² = 0.41, room for improvement)
+- **Pydantic** - LLM response type validation
+- **Redis** - Response caching (optional)
+- **Rich** - CLI interface
 
 ---
 
-## 📦 Instalacja
+## 📦 Installation
 
 ```bash
-# Klonuj repozytorium
+# Clone repository
 git clone https://github.com/GabrielWalak/Agentic-Logistics-Optimizer.git
 cd Agentic-Logistics-Optimizer
 
-# Stwórz środowisko wirtualne
+# Create virtual environment
 python -m venv .venv
 .venv\Scripts\activate  # Windows
 
-# Zainstaluj zależności
+# Install dependencies
 pip install pydantic ollama chromadb sentence-transformers xgboost scikit-learn pandas rich python-dotenv
 
-# Pobierz model Mistral dla Ollama
+# Pull Mistral model for Ollama
 ollama pull mistral
 
-# Uruchom system
+# Run the system
 python main.py
 ```
 
 ---
 
-## 🎮 Użycie
+## 🎮 Usage
 
-### Uruchomienie pełnego systemu
+### Run full system
 ```bash
 python main.py
 ```
 
-### Test połączenia z agentami
+### Test agent connection
 ```bash
 python pydantic_agents.py
 ```
@@ -79,76 +138,66 @@ python pydantic_agents.py
 
 ## 📸 Screenshots
 
-### System startup i inicjalizacja
+### System startup and initialization
 ![System Initialization](screenshots/1.png)
 
-### Analiza scenariusza przez Multi-Agent System
+### Multi-Agent System scenario analysis
 ![Agent Analysis](screenshots/2.png)
 
-### Wynik końcowy z rekomendacjami
+### Final output with recommendations
 ![Final Decision](screenshots/3.png)
 
 ---
 
-## 📁 Struktura projektu
+## 📁 Project Structure
 
 ```
 AgenticAI/
-├── main.py                     # Punkt wejścia - orkiestracja workflow
-├── pydantic_agents.py          # System multi-agentowy z modelami Pydantic
-├── chroma_db_manager.py        # Manager bazy wektorowej ChromaDB
-├── logistics_knowledge_base.py # Dokumenty domenowe dla RAG
-├── logistics_docs/             # Pliki źródłowe wiedzy
+├── main.py                     # Entry point - workflow orchestration
+├── pydantic_agents.py          # Multi-agent system with Pydantic models
+├── chroma_db_manager.py        # ChromaDB vector database manager
+├── logistics_knowledge_base.py # Domain documents for RAG
+├── logistics_docs/             # Source knowledge files
 │   ├── carrier_rules.txt
 │   ├── customer_recovery.txt
 │   ├── distance_guidelines.txt
 │   └── ...
-└── screenshots/                # Screenshoty z aplikacji
+└── screenshots/                # Application screenshots
 ```
 
 ---
 
-## 🔧 Jak to działa?
+## 🔧 How it works
 
 ### 1. Input
 ```python
 scenario = {
-    'product_weight_g': 5000,      # Ciężka paczka
-    'distance_km': 1200.0,         # Długi dystans
-    'payment_lag_days': 2,         # Opóźnienie płatności
-    'is_weekend_order': 1,         # Zamówienie weekendowe
-    'freight_value': 85.00         # Koszt frachtu
+    'product_weight_g': 5000,      # Heavy package
+    'distance_km': 1200.0,         # Long distance
+    'payment_lag_days': 2,         # Payment delay
+    'is_weekend_order': 1,         # Weekend order
+    'freight_value': 85.00         # Freight cost
 }
 ```
 
 ### 2. XGBoost Prediction
-Model przewiduje: **9.2 dni** (obiecano 7 dni → RYZYKO OPÓŹNIENIA)
+Model predicts: **9.2 days** (promised 7 days → DELAY RISK)
 
 ### 3. RAG Context
-ChromaDB znajduje relevantne dokumenty:
-- "Dystans >800km wymaga Premium Express"
-- "Weekend orders +1-2 dni processing"
+ChromaDB finds relevant documents:
+- "Distance >800km requires Premium Express"
+- "Weekend orders +1-2 days processing"
 
 ### 4. Multi-Agent Analysis
-Agenty analizują równolegle i zwracają:
+Agents analyze in parallel and return:
 - **Risk Score**: 85/100 (HIGH)
-- **Carrier**: Upgrade do Premium Express
-- **Voucher**: DELAY50 (50% zniżki na kolejne zamówienie)
+- **Carrier**: Upgrade to Premium Express
+- **Voucher**: DELAY50 (50% discount on next order)
 - **Confidence**: 90/100
 
 ---
 
-## 📊 Wydajność
-
-| Metryka | Wartość |
-|---------|---------|
-| Czas analizy (bez cache) | 30-45 sekund |
-| Czas analizy (z cache Redis) | ~2 sekundy |
-| Model XGBoost R² | 0.41 |
-
----
-
-## 📄 Licencja
+## 📄 License
 
 MIT License
 
