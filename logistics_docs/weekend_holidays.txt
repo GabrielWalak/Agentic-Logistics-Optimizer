@@ -1,0 +1,37 @@
+
+WEEKEND AND HOLIDAY IMPACT ON DELIVERY
+
+WEEKEND PENALTY:
+- Friday 18:00 - Sunday 23:59: +2-3 days delay expected
+- Courier pickup: Suspended until Monday
+- Processing: Resumes Monday 08:00 AM
+- Monday impact: +1 additional day due to peak volume
+- Recommendation: Auto-upgrade to Premium Express for weekend orders
+- Historical data: 73% of weekend orders experience delay
+
+BRAZILIAN HOLIDAYS (Impact on delivery):
+- Christmas (Dec 25): +5-7 days | National shutdown
+- New Year (Jan 1): +3-4 days | Reduced operations
+- Carnival (February): +2-3 days (varies by year) | Regional impact
+- Tiradentes Day (Apr 21): +1-2 days | National holiday
+- Corpus Christi (variable): +1 day | Regional observance
+- Independence Day (Sep 7): +1-2 days | National celebration
+- Our Lady (Oct 12): +1 day | Religious observance
+- Black Consciousness (Nov 20): +1 day | National holiday
+- Labor Day (May 1): +1 day | National holiday
+
+PEAK SEASON (November - December):
+- General delay: +3-5 days across all carriers
+- Volume increase: +200-300% vs normal operations
+- Carrier recommendation: Upgrade minimum one tier
+- Risk level: CRITICAL for Standard Shipping
+- Black Friday (late Nov): +4-6 days
+- Cyber Monday: +3-5 days
+- Christmas rush (Dec 15-24): +7-10 days
+
+STRATEGY:
+- Weekend order? Force upgrade to Premium Express
+- Holiday within 10 days? Add buffer +3 days to estimate
+- November-December? Auto-upgrade all Standard → Premium
+- Post-holiday period (Jan 2-15): Normal +1 day recovery delay
+    

@@ -1,0 +1,60 @@
+
+WEIGHT AND VOLUME IMPACT ON DELIVERY TIME
+
+LIGHTWEIGHT PACKAGES (<500g):
+- Delivery speed: FASTEST ⚡
+- Carrier cost: MINIMUM
+- Suitable carriers: Any
+- Average delay vs baseline: -1 day
+- Handling: Automated sorting possible
+- Recommendation: Standard Shipping sufficient
+- Packaging: Standard envelope or small box
+- Damage rate: 0.5%
+
+MEDIUM PACKAGES (500g - 2kg):
+- Delivery speed: NORMAL
+- Carrier cost: STANDARD
+- Suitable carriers: Preferred Standard
+- Average delay vs baseline: BASELINE
+- Handling: Standard manual processing
+- Recommendation: Standard Shipping OK
+- Packaging: Standard box with minimal protection
+- Damage rate: 1.2%
+
+HEAVY PACKAGES (2kg - 5kg):
+- Delivery speed: SLOWER (+1-2 days)
+- Carrier cost: +30-50% surcharge
+- Suitable carriers: SEDEX recommended
+- Average delay vs baseline: +1-2 days
+- Handling: Requires special handling
+- Recommendation: SEDEX or Premium Express
+- Packaging: Reinforced box with bubble wrap
+- Damage rate: 2.1%
+
+VERY HEAVY PACKAGES (5kg - 10kg):
+- Delivery speed: SIGNIFICANTLY SLOWER (+3-5 days)
+- Carrier cost: +100%+ surcharge
+- Suitable carriers: MANDATORY Premium or SEDEX
+- Average delay vs baseline: +3-5 days
+- Handling: Requires special equipment (pallet jack)
+- Recommendation: ALWAYS Premium/SEDEX
+- Packaging: Heavy-duty box with corner protection
+- Damage rate: 3.5%
+
+OVERSIZED PACKAGES (>10kg):
+- Delivery speed: EXTREMELY SLOW (+5-10 days)
+- Carrier cost: +150%+ surcharge
+- Suitable carriers: Premium Express ONLY
+- Average delay vs baseline: +5-10 days
+- Handling: Requires courier signature + special equipment
+- Recommendation: Consider split shipments
+- Packaging: Industrial-grade packaging required
+- Damage rate: 5.2%
+- Warning: May not be eligible for certain remote regions
+
+VOLUME-TO-WEIGHT RATIO IMPACT:
+- High volume, low weight: Standard processing
+- Low volume, high weight: Slower delivery (density issues)
+- Dimensional weight pricing applies when volume > 5000cm³
+- Example: 1kg in 50L vs 1kg in 2L = same delivery speed
+    

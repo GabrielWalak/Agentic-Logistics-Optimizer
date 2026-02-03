@@ -1,0 +1,44 @@
+
+DELIVERY TIME GUIDELINES BY DISTANCE
+
+LOCAL DELIVERY (0-100 km):
+- Recommended carrier: LOCAL COURIER / STANDARD
+- Average delivery: 1-3 days
+- Risk level: MINIMAL ✓
+- Recommendation: Standard Shipping suitable
+- Weight impact: Minimal
+- Peak season delay: +0-1 day
+- Success rate: 98%
+- Common issues: Traffic congestion in urban areas
+
+REGIONAL DELIVERY (100-500 km):
+- Recommended carrier: Regional Partner / SEDEX
+- Average delivery: 3-7 days
+- Risk level: MODERATE ⚠
+- Recommendation: Premium Express for fragile items
+- Weight impact: Moderate (+1 day per 5kg)
+- Peak season delay: +1-2 days
+- Success rate: 95%
+- Common issues: Interstate border delays, weather conditions
+
+INTERSTATE DELIVERY (500-1500 km):
+- Recommended carrier: OLIST Main Network / Premium Express
+- Average delivery: 7-15 days
+- Risk level: HIGH 🔴
+- Recommendation: Premium Express for high-value items (>R$500)
+- Weight impact: Significant (+2-3 days per 5kg)
+- Peak season delay: +2-3 days
+- Success rate: 92%
+- Common issues: Multiple handoffs, customs delays, infrastructure
+
+LONG-DISTANCE DELIVERY (>1500 km):
+- Recommended carrier: Premium Express (MANDATORY)
+- Average delivery: 15-30 days
+- Risk level: CRITICAL 🔴🔴
+- Recommendation: ALWAYS use Premium or upgrade carrier
+- Weight impact: Critical (+3-5 days per 5kg)
+- Peak season delay: +3-5 days
+- Success rate: 88%
+- Common issues: Remote regions, limited carrier coverage
+- Note: Consider split shipments for packages >10kg
+    

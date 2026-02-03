@@ -1,0 +1,57 @@
+
+CUSTOMER RECOVERY AND RETENTION STRATEGY
+
+VOUCHER CODE SYSTEM:
+
+DELAY15 - 15% Discount
+- Condition: Delay of 1-3 days vs promised delivery
+- Customer impact: Moderate dissatisfaction (NPS: -10)
+- Retention rate WITH voucher: 78%
+- Retention rate WITHOUT: 45%
+- Revenue impact: -15% order value, +33% retention
+- Average LTV recovered: R$450 per customer
+- Churn reduction: 33%
+
+DELAY25 - 25% Discount
+- Condition: Delay of 3-7 days vs promised delivery
+- Customer impact: High dissatisfaction (NPS: -30)
+- Retention rate WITH voucher: 82%
+- Retention rate WITHOUT: 30%
+- Revenue impact: -25% order value, +52% retention
+- Average LTV recovered: R$650 per customer
+- Churn reduction: 52%
+
+DELAY50 - 50% Discount + FREE NEXT SHIPPING
+- Condition: Delay >7 days vs promised delivery
+- Customer impact: Critical dissatisfaction (NPS: -50)
+- Retention rate WITH voucher: 85%
+- Retention rate WITHOUT: 10%
+- Revenue impact: -50% order value, +75% retention
+- Average LTV recovered: R$800 per customer
+- Churn reduction: 75%
+
+EXPRESS_FREE - Free Upgraded Shipping
+- Condition: Carrier fault (not customer/seller)
+- Customer impact: Positive surprise (NPS: +20)
+- Retention rate: 90%+
+- Revenue impact: -R$50-80 shipping cost, excellent loyalty
+- Average LTV recovered: R$1000 per customer
+- Recommendation: Use proactively for VIP customers
+
+COMMUNICATION PROTOCOL:
+- Delay 1-3 days: Send DELAY15 within 24 hours of detection
+- Delay 3-7 days: Send DELAY25 + tracking update + apology email
+- Delay >7 days: Send DELAY50 + personal contact + resolution offer
+- Carrier issue: Offer EXPRESS_FREE on next order + apology
+
+TIMING STRATEGY:
+- Send voucher BEFORE customer complains (proactive approach)
+- Include real-time tracking update with apology
+- Follow up when order arrives with satisfaction survey
+- For VIP customers (>5 orders): upgrade voucher by one tier
+
+ROI ANALYSIS:
+- Cost of voucher: R$20-150 per incident
+- Cost of lost customer: R$500-2000 LTV
+- Recovery ROI: 300-500% for proactive voucher strategy
+    

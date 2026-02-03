@@ -1,0 +1,60 @@
+
+PAYMENT LAG IMPACT ON DELIVERY TIME
+
+PAYMENT LAG = Days between order placement and shipment dispatch
+
+IMMEDIATE PAYMENT (0-1 day):
+- Shipping starts: Immediately after payment confirmed
+- Risk level: MINIMAL ✓
+- Processing delay: None
+- Expected delay vs baseline: -5% (faster processing)
+- Reliability: Very high (98%+ shipment rate)
+- Fraud rate: 0.3%
+- Recommendation: Standard Shipping OK
+- Customer segment: Trusted repeat customers
+
+NORMAL PAYMENT (1-3 days):
+- Shipping starts: After standard verification (24-72h)
+- Risk level: LOW ✓
+- Processing delay: Standard queue
+- Expected delay vs baseline: BASELINE
+- Reliability: High (95%+ shipment rate)
+- Fraud rate: 1.2%
+- Recommendation: Standard Shipping suitable
+- Customer segment: Regular customers
+
+DELAYED PAYMENT (3-7 days):
+- Shipping starts: After compliance review
+- Risk level: MODERATE ⚠
+- Processing delay: Manual verification needed (+2 days)
+- Expected delay vs baseline: +2-3 days additional
+- Reliability: Moderate (85-90% shipment rate)
+- Fraud rate: 4.5%
+- Chargeback risk: 2-5%
+- Recommendation: Premium Express IF shipping proceeds
+- Customer segment: New customers, payment issues
+
+PAYMENT ISSUES (>7 days):
+- Shipping starts: After extended risk assessment (if approved)
+- Risk level: HIGH 🔴
+- Processing delay: Extended compliance review (+5 days)
+- Expected delay vs baseline: +5-10 days additional
+- Reliability: Low (60-70% shipment rate)
+- Fraud rate: 12%+
+- Chargeback risk: 10-20%
+- Cancellation probability: 30-40%
+- Recommendation: Premium Express for approved orders only
+- Customer segment: High-risk customers
+- Note: Consider partial refund for customer satisfaction
+
+STRATEGIC RECOMMENDATIONS:
+- Payment lag >3 days? Auto-upgrade to Premium Express
+- Payment lag >7 days? Require manager approval before shipping
+- High-risk customer? Request prepaid Premium shipping
+- First-time buyer with lag >5 days? Contact customer service
+
+FINANCIAL IMPACT:
+- Each day of payment lag = +0.5 days delivery delay
+- Chargeback cost: R$50-200 per incident + order value
+- Fraud prevention ROI: 400% (cost vs. prevented losses)
+    
