@@ -4,6 +4,12 @@ Advanced multi-agent architecture for intelligent logistics optimization using R
 
 **Status:** ✅ Core AI system complete. Multi-agent orchestration + RAG + Eval framework ready for integration.
 
+### 🛠️ Tech Stack
+* **Core:** Python 3.11, FastAPI, Pydantic V2
+* **AI & LLM:** GitHub Models API (gpt-4o-mini), OpenAI SDK, ChromaDB (Vector Store), Prompt Engineering
+* **Architecture:** Multi-Agent Orchestration, RAG (Retrieval-Augmented Generation), LLM-as-a-Judge
+* **Infrastructure:** Docker, AWS EC2 (t3.micro), Environment Variables (.env)
+
 ---
 
 ## 🧠 AI/ML Architecture
