@@ -1,208 +1,255 @@
-# 🤖 AgenticAI - Multi-Agent Logistics Decision System
+# AgenticAI Logistics - Docker Deployment Ready 🚀
 
-A Decision Intelligence system combining ML predictions with Multi-Agent LLM architecture for autonomous e-commerce delivery risk analysis.
+## What's in this branch?
 
----
+Complete Docker setup + AWS deployment guide for AgenticAI multi-agent logistics system.
 
-## 🎯 What does this system do?
-
-The system takes order data (weight, distance, payment lag, etc.) and:
-
-1. **ML Prediction** - XGBoost model predicts delivery time
-2. **RAG Context** - ChromaDB retrieves relevant logistics rules
-3. **Agent Analysis** - 4 specialized AI agents analyze the scenario in parallel
-4. **Decision** - System generates recommendations: voucher, carrier upgrade, customer communication
+**Status:** ✅ Tested locally, ready for AWS EC2 t3.micro
 
 ---
 
-## 📐 System Architecture
+## 📦 What You Get
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                         OLIST AGENTIC AI SYSTEM                             │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  ┌──────────────┐    ┌──────────────┐    ┌──────────────────────────────┐  │
-│  │   INPUT      │    │   XGBOOST    │    │     CHROMADB RAG             │  │
-│  │  Delivery    │───▶│   Model      │───▶│  ┌────────────────────────┐  │  │
-│  │  Scenario    │    │              │    │  │ Semantic Search        │  │  │
-│  └──────────────┘    └──────────────┘    │  │ all-MiniLM-L6-v2       │  │  │
-│                             │            │  │ 39 Knowledge Chunks    │  │  │
-│                             ▼            │  └────────────────────────┘  │  │
-│                      Predicted Days      └──────────────┬───────────────┘  │
-│                             │                           │                  │
-│                             ▼                           ▼                  │
-│  ┌──────────────────────────────────────────────────────────────────────┐  │
-│  │                    MULTI-AGENT ORCHESTRATION                         │  │
-│  │  ┌─────────────────────────────────────────────────────────────────┐ │  │
-│  │  │                    Ollama + Mistral 7B                          │ │  │
-│  │  │                   (Local LLM Inference)                         │ │  │
-│  │  └─────────────────────────────────────────────────────────────────┘ │  │
-│  │                              │                                       │  │
-│  │        ┌─────────────────────┼─────────────────────┐                 │  │
-│  │        ▼                     ▼                     ▼                 │  │
-│  │  ┌───────────┐        ┌───────────┐        ┌───────────┐             │  │
-│  │  │   RISK    │        │  CARRIER  │        │ RECOVERY  │             │  │
-│  │  │   AGENT   │        │   AGENT   │        │   AGENT   │             │  │
-│  │  │           │        │           │        │           │             │  │
-│  │  │ • Score   │        │ • Upgrade │        │ • Voucher │             │  │
-│  │  │ • Factors │        │ • Cost    │        │ • Timing  │             │  │
-│  │  │ • Priority│        │ • ROI     │        │ • Message │             │  │
-│  │  └─────┬─────┘        └─────┬─────┘        └─────┬─────┘             │  │
-│  │        │                    │                    │                   │  │
-│  │        └────────────────────┼────────────────────┘                   │  │
-│  │                             ▼                                        │  │
-│  │                    ┌─────────────────┐                               │  │
-│  │                    │  ORCHESTRATOR   │                               │  │
-│  │                    │     AGENT       │                               │  │
-│  │                    │                 │                               │  │
-│  │                    │ Executive       │                               │  │
-│  │                    │ Summary +       │                               │  │
-│  │                    │ Confidence      │                               │  │
-│  │                    └─────────────────┘                               │  │
-│  └──────────────────────────────────────────────────────────────────────┘  │
-│                              │                                             │
-│                              ▼                                             │
-│  ┌──────────────────────────────────────────────────────────────────────┐  │
-│  │                      INTEGRATED DECISION                             │  │
-│  │  • Risk Level (HIGH/MODERATE/LOW)    • Carrier Recommendation        │  │
-│  │  • Voucher Code (DELAY15/DELAY50)    • Customer Communication        │  │
-│  │  • ROI Analysis                      • Confidence Score              │  │
-│  └──────────────────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
+- ✅ **Multi-agent system** (4 agents running in parallel)
+- ✅ **GitHub Models API** integration (gpt-4o-mini, free tier)
+- ✅ **Docker image** optimized for 1GB RAM (600-700MB)
+- ✅ **Response grading** (0-100 scale with logic validation)
+- ✅ **3 test scenarios** (HIGH/LOW/MODERATE risk)
+- ✅ **Security hardening** (token management, no secrets in image)
+- ✅ **Complete documentation** (AWS guide, quick start, security)
 
 ---
 
-## 🧠 Multi-Agent Architecture
-
-The system uses 4 specialized LLM agents (Mistral 7B via Ollama):
-
-| Agent | Responsibility |
-|-------|----------------|
-| **Risk Agent** | Risk assessment (0-100), risk factor identification |
-| **Carrier Agent** | Carrier recommendation, upgrade ROI analysis |
-| **Recovery Agent** | Customer retention strategy, voucher codes |
-| **Orchestrator** | Synthesis of all analyses, executive summary |
-
----
-
-## 🛠️ Tech Stack
-
-- **Python 3.10+**
-- **Ollama + Mistral 7B** - Local LLM (no API keys needed)
-- **ChromaDB** - Vector database for RAG
-- **XGBoost** - Delivery time prediction model (R² = 0.41, room for improvement)
-- **Pydantic** - LLM response type validation
-- **Redis** - Response caching (optional)
-- **Rich** - CLI interface
-
----
-
-## 📦 Installation
+## 🚀 Quick Start (Local Testing)
 
 ```bash
-# Clone repository
-git clone https://github.com/GabrielWalak/Agentic-Logistics-Optimizer.git
-cd Agentic-Logistics-Optimizer
+# 1. Copy env template
+cp .env.example .env
+nano .env  # Add your GITHUB_TOKEN
 
-# Create virtual environment
-python -m venv .venv
-.venv\Scripts\activate  # Windows
+# 2. Build Docker image
+docker build -t agentic-ai-logistics:latest .
 
-# Install dependencies
-pip install pydantic ollama chromadb sentence-transformers xgboost scikit-learn pandas rich python-dotenv
+# 3. Run with compose
+docker-compose up
 
-# Pull Mistral model for Ollama
-ollama pull mistral
+# 4. Test in another terminal
+docker exec -it agentic-ai-logistics python app.py
+```
 
-# Run the system
-python main.py
+Expected output:
+```
+✓ GitHub Models connected. Model: gpt-4o-mini
+✓ Multi-agent analysis complete in ~15 seconds
+✓ System Status: READY
 ```
 
 ---
 
-## 🎮 Usage
+## ☁️ Deploy to AWS (5 minutes)
 
-### Run full system
 ```bash
-python main.py
+# Read this first
+cat QUICK_START_AWS.md
+
+# Then:
+# 1. Create EC2 t3.micro instance (Ubuntu 24.04)
+# 2. SSH in
+# 3. Run: curl ... | bash (see QUICK_START_AWS.md)
 ```
 
-### Test agent connection
+**Cost:** $0/month (free tier, 12 months)
+
+---
+
+## 📚 Documentation
+
+| File | Purpose |
+|------|---------|
+| **QUICK_START_AWS.md** | 5-minute deployment guide |
+| **AWS_DEPLOYMENT.md** | Detailed step-by-step setup |
+| **BUILD_INSTRUCTIONS.md** | Local Docker build guide |
+| **SECURITY.md** | Token management & security best practices |
+| **SECURITY_QUICK_REF.md** | Security checklist & quick reference |
+| **DEPLOYMENT.md** | Overview & architecture |
+
+---
+
+## 🔐 Security
+
+- ✅ Token stored in `~/.agentic.env` (HOME, not in repo)
+- ✅ `.env` in `.gitignore` (never committed)
+- ✅ No secrets in Docker image
+- ✅ Token expires every 90 days
+- ✅ GitHub Secret Scanning enabled
+
+**See:** SECURITY_QUICK_REF.md for details
+
+---
+
+## 📊 System Architecture
+
+```
+User Input
+    ↓
+Interactive CLI (app.py)
+    ↓
+4-Agent Orchestration
+  ├─ Risk Assessment Agent
+  ├─ Carrier Optimization
+  ├─ Recovery Strategy
+  └─ Decision Integrator
+    ↓
+Response Grading (0-100)
+    ↓
+Output
+```
+
+---
+
+## 💾 Key Files
+
+```
+Deployment:
+├── Dockerfile              # Multi-stage build (600-700MB)
+├── docker-compose.yml      # Local testing config
+├── requirements.txt        # Minimal deps (5 packages)
+├── .dockerignore           # Excludes from image
+├── run.sh                  # Container entry point
+└── deploy.sh               # AWS deployment script
+
+Application:
+├── app.py                  # Interactive CLI
+├── pydantic_agents.py      # 4-agent orchestration
+├── scenarios_examples.py   # 3 test scenarios
+├── prompt_engineering.py   # Prompts + response grading
+└── chroma_db_manager.py    # Vector DB (optional)
+
+Documentation:
+├── QUICK_START_AWS.md      # 5-minute quickstart
+├── AWS_DEPLOYMENT.md       # Full AWS guide
+├── BUILD_INSTRUCTIONS.md   # Local Docker
+├── SECURITY.md             # Security guide
+├── SECURITY_QUICK_REF.md   # Security checklist
+└── DEPLOYMENT.md           # Overview
+```
+
+---
+
+## ✅ Testing Status
+
+- ✅ Docker image builds successfully
+- ✅ Container runs locally (docker-compose up)
+- ✅ GitHub Models API connects (gpt-4o-mini)
+- ✅ All 3 scenarios execute (~10-20s each)
+- ✅ Response grading works (0-100 scale)
+- ✅ Memory usage optimal for t3.micro (<500MB)
+- ✅ Security: No tokens in image/git
+
+---
+
+## 🎯 Next Steps
+
+### Option 1: Deploy to AWS Now
 ```bash
-python pydantic_agents.py
+# Follow QUICK_START_AWS.md
+# 5 minutes, completely free for 12 months
+```
+
+### Option 2: Test More Locally
+```bash
+# Run all test scenarios
+docker exec agentic-app python -c "from scenarios_examples import run_all_scenarios; run_all_scenarios()"
+
+# Test response grading
+docker exec agentic-app python test_grader.py
+
+# Check system status
+docker exec agentic-app python app.py  # Select option 5
+```
+
+### Option 3: Merge to Main
+```bash
+# Create Pull Request on GitHub
+# feature/docker-deployment → main
+# Once reviewed, merge
 ```
 
 ---
 
-## 📸 Screenshots
+## 📈 Performance
 
-### System startup and initialization
-![System Initialization](screenshots/1.png)
-
-### Multi-Agent System scenario analysis
-![Agent Analysis](screenshots/2.png)
-
-### Final output with recommendations
-![Final Decision](screenshots/3.png)
+| Metric | Value |
+|--------|-------|
+| Image size | ~600-700 MB |
+| Memory (baseline) | ~300-400 MB |
+| Memory (per request) | ~100-150 MB |
+| Analysis time | ~10-20 seconds |
+| Free t3.micro RAM | ~600 MB ✓ |
+| AWS cost | **$0/month** |
 
 ---
 
-## 📁 Project Structure
+## 🛠️ Troubleshooting
 
-```
-AgenticAI/
-├── main.py                     # Entry point - workflow orchestration
-├── pydantic_agents.py          # Multi-agent system with Pydantic models
-├── chroma_db_manager.py        # ChromaDB vector database manager
-├── logistics_knowledge_base.py # Domain documents for RAG
-├── logistics_docs/             # Source knowledge files
-│   ├── carrier_rules.txt
-│   ├── customer_recovery.txt
-│   ├── distance_guidelines.txt
-│   └── ...
-└── screenshots/                # Application screenshots
+**Container won't start?**
+```bash
+docker logs agentic-app
+docker build --no-cache -t agentic-ai-logistics:latest .
 ```
 
----
-
-## 🔧 How it works
-
-### 1. Input
-```python
-scenario = {
-    'product_weight_g': 5000,      # Heavy package
-    'distance_km': 1200.0,         # Long distance
-    'payment_lag_days': 2,         # Payment delay
-    'is_weekend_order': 1,         # Weekend order
-    'freight_value': 85.00         # Freight cost
-}
+**GitHub Models API fails?**
+```bash
+docker exec agentic-app python -c "from pydantic_agents import check_ollama_status; check_ollama_status()"
 ```
 
-### 2. XGBoost Prediction
-Model predicts: **9.2 days** (promised 7 days → DELAY RISK)
+**Token issues?**
+```bash
+# See SECURITY.md for token management
+# Short version: nano ~/.agentic.env
+```
 
-### 3. RAG Context
-ChromaDB finds relevant documents:
-- "Distance >800km requires Premium Express"
-- "Weekend orders +1-2 days processing"
-
-### 4. Multi-Agent Analysis
-Agents analyze in parallel and return:
-- **Risk Score**: 85/100 (HIGH)
-- **Carrier**: Upgrade to Premium Express
-- **Voucher**: DELAY50 (50% discount on next order)
-- **Confidence**: 90/100
+See **AWS_DEPLOYMENT.md** for full troubleshooting.
 
 ---
 
-## 📄 License
+## 📝 Pre-Deployment Checklist
 
-MIT License
+```bash
+# Validate setup
+python pre_deploy_check.py
+```
+
+Should show: ✅ All checks passed!
 
 ---
 
-<p align="center">
-  <strong>Built with 🤖 Ollama + ChromaDB + XGBoost</strong>
-</p>
+## 🔄 When Merging to Main
+
+After testing on this branch:
+
+1. Create Pull Request (GitHub)
+2. Add description from DEPLOYMENT.md
+3. Request review if needed
+4. Merge to main
+5. Delete feature branch (GitHub UI)
+
+---
+
+## 📞 Support
+
+- **Local issues** → BUILD_INSTRUCTIONS.md
+- **AWS issues** → AWS_DEPLOYMENT.md  
+- **Security** → SECURITY.md
+- **Quick help** → SECURITY_QUICK_REF.md
+
+---
+
+**Ready? → Start with [QUICK_START_AWS.md](QUICK_START_AWS.md)** 🚀
+
+Or test locally first:
+```bash
+cp .env.example .env
+nano .env
+docker-compose up
+```
