@@ -9,8 +9,12 @@ import re
 import hashlib
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict
-import ollama
+from openai import OpenAI
 import json
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Optional: Redis cache and LangSmith tracing
 try:
@@ -86,68 +90,66 @@ class IntegratedDecision(BaseModel):
     confidence_score: float = Field(default=75.0, description="Overall confidence 0-100")
 
 
+# ===== GITHUB MODELS CLIENT =====
+
+def _get_github_client() -> OpenAI:
+    """Initialize OpenAI client configured for GitHub Models API"""
+    token = os.getenv("GITHUB_TOKEN", "").strip()
+    if not token:
+        raise ValueError("Missing GITHUB_TOKEN environment variable. Set it in .env or export GITHUB_TOKEN=...")
+    base_url = os.getenv("GITHUB_MODELS_BASE_URL", "https://models.inference.ai.azure.com")
+    return OpenAI(base_url=base_url, api_key=token)
+
+
 # ===== OLLAMA DIRECT API =====
 
-def call_ollama(system_prompt: str, user_prompt: str, model: str = "mistral:latest", stream: bool = False) -> str:
-    """Direct Ollama API call with error handling and optional streaming"""
+def call_ollama(
+    system_prompt: str,
+    user_prompt: str,
+    model: Optional[str] = None,
+    stream: bool = False
+) -> str:
+    """LLM API call via GitHub Models using OpenAI SDK (backward-compatible name)."""
     try:
-        # Check cache first
         cache_key = rag_cache.make_key(system_prompt + user_prompt)
         cached = rag_cache.get(cache_key)
         if cached:
             if stream:
-                print("[cached] ", end='', flush=True)
+                print("[cached] ", end="", flush=True)
             return cached
-        
+
+        model_name = model or os.getenv("GITHUB_MODEL", "gpt-4o-mini")
+        client = _get_github_client()
+
+        response = client.chat.completions.create(
+            model=model_name,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=float(os.getenv("LLM_TEMPERATURE", "0.3")),
+            max_tokens=int(os.getenv("LLM_MAX_TOKENS", "1024")),
+            top_p=float(os.getenv("LLM_TOP_P", "0.9")),
+            stream=stream,
+        )
+
         if stream:
-            # Streaming mode - show real-time output
             full_response = ""
-            stream_response = ollama.chat(
-                model=model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                stream=True,
-                options={
-                    "temperature": 0.3,
-                    "num_predict": 1024,
-                    "top_p": 0.9,
-                }
-            )
-            
-            for chunk in stream_response:
-                content = chunk['message']['content']
-                full_response += content
-                print(content, end='', flush=True)
-            
-            print()  # New line after streaming
-            
-            # Cache the result
+            for chunk in response:
+                delta = chunk.choices[0].delta.content if chunk.choices else None
+                if delta:
+                    full_response += delta
+                    print(delta, end="", flush=True)
+            print()
             rag_cache.set(cache_key, full_response)
             return full_response
-        else:
-            # Non-streaming mode
-            response = ollama.chat(
-                model=model,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                options={
-                    "temperature": 0.3,
-                    "num_predict": 1024,
-                    "top_p": 0.9,
-                }
-            )
-            result = response['message']['content']
-            
-            # Cache the result
-            rag_cache.set(cache_key, result)
-            return result
-            
+
+        result = response.choices[0].message.content or ""
+        rag_cache.set(cache_key, result)
+        return result
+
     except Exception as e:
-        return f'{{"error": "Ollama error: {str(e)}"}}'
+        return f'{{"error": "GitHub Models error: {str(e)}"}}'
 
 
 def parse_json_response(response: str) -> Dict:
@@ -563,33 +565,23 @@ def run_multi_agent_analysis_parallel(scenario: DeliveryScenario) -> IntegratedD
 
 # Test if Ollama is available
 def check_ollama_status() -> bool:
-    """Check if Ollama is running and has required models"""
+    """Check if GitHub Models endpoint is reachable (kept name for compatibility)."""
     try:
-        response = ollama.list()
-        models = [m.get('name', m.get('model', '')) for m in response.get('models', [])]
-        print(f"✓ Ollama connected. Available models: {', '.join(models)}")
-        
-        # Check GPU usage
-        try:
-            ps_response = ollama.ps()
-            if ps_response.get('models'):
-                for model in ps_response['models']:
-                    vram = model.get('size_vram', 0)
-                    if vram > 0:
-                        print(f"  🎮 GPU detected: {vram / (1024**3):.1f} GB VRAM in use")
-                    else:
-                        print(f"  💻 CPU mode (set OLLAMA_BACKEND=vulkan for AMD GPU)")
-        except:
-            pass
-        
-        # Show enabled features
-        print(f"\n🔧 Features:")
+        client = _get_github_client()
+        model_name = os.getenv("GITHUB_MODEL", "gpt-4o-mini")
+        _ = client.chat.completions.create(
+            model=model_name,
+            messages=[{"role": "user", "content": "reply with OK"}],
+            max_tokens=8,
+            temperature=0.0,
+        )
+        print(f"✓ GitHub Models connected. Model: {model_name}")
+        print("\n🔧 Features:")
         print(f"  {'✓' if rag_cache.enabled else '✗'} Redis cache: {'enabled' if rag_cache.enabled else 'disabled'}")
         print(f"  {'✓' if LANGSMITH_AVAILABLE and os.getenv('LANGSMITH_API_KEY') else '✗'} LangSmith tracing: {'enabled' if LANGSMITH_AVAILABLE and os.getenv('LANGSMITH_API_KEY') else 'disabled'}")
-        
         return True
     except Exception as e:
-        print(f"⚠ Ollama not available: {e}")
+        print(f"⚠ GitHub Models not available: {e}")
         return False
 
 
@@ -599,3 +591,18 @@ if __name__ == "__main__":
     if not check_ollama_status():
         print("❌ Please start Ollama first")
         exit(1)
+
+# Test scenario
+scenario = DeliveryScenario(
+    predicted_days=8.5,
+    promised_days=7.0,
+    distance_km=450,
+    weight_g=1200,
+    payment_lag_days=2,
+    is_weekend_order=0,
+    freight_value=45.00,
+    rag_context="Standard carrier rules apply. Regional delivery expected."
+)
+
+result = run_multi_agent_analysis_parallel(scenario)
+print(result)

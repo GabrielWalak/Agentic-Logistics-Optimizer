@@ -1,6 +1,32 @@
+# Virtual environments
 .venv/
+venv/
+env/
+
+# Environment secrets (NEVER commit!)
 .env
+.env.local
+.env.*.local
+.env.production.local
+
+# Python
 __pycache__/
+*.py[cod]
+*$py.class
+*.so
 *.pkl
 *.joblib
+
+# IDE
 .idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+.docker
+docker-compose.override.yml

@@ -6,7 +6,6 @@ import os
 import chromadb
 from chromadb.config import Settings
 from chromadb.utils import embedding_functions
-import ollama
 from typing import List, Dict, Optional
 from logistics_knowledge_base import LOGISTICS_DOCUMENTS, create_knowledge_base
 
@@ -287,7 +286,6 @@ if __name__ == "__main__":
     
     print("\n📊 Indexing knowledge base...")
     manager.index_knowledge_base(force_reindex=False)
-    
     print("\n📈 Database Stats:")
     stats = manager.get_stats()
     for key, value in stats.items():

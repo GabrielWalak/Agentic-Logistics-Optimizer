@@ -1,0 +1,37 @@
+version: '3.8'
+
+services:
+  agentic-app:
+    build: .
+    container_name: agentic-ai-logistics
+    environment:
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - GITHUB_MODELS_BASE_URL=https://models.inference.ai.azure.com
+      - GITHUB_MODEL=gpt-4o-mini
+      - LLM_TEMPERATURE=0.7
+      - LLM_TOP_P=0.9
+      - LLM_MAX_TOKENS=1000
+      - REDIS_ENABLED=false
+    env_file:
+      - .env
+    volumes:
+      - ./logistics_docs:/app/logistics_docs:ro
+      - ./chroma_db:/app/chroma_db
+    stdin_open: true
+    tty: true
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "from pydantic_agents import check_ollama_status; check_ollama_status()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    # Resource limits for t3.micro
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 800M
+        reservations:
+          cpus: '0.5'
+          memory: 400M
