@@ -345,4 +345,3 @@ python app.py  # Menu option 5: "System Status"
 
 ---
 
-**Deep dive into the AI system architecture? Start with `pydantic_agents.py` (orchestration) and `prompt_engineering.py` (grading logic)** 🧠
