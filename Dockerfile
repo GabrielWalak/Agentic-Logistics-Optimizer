@@ -1,39 +1,55 @@
-# Multi-stage build for minimal image size
-FROM python:3.11-slim as base
+# Dockerfile for Agentic Logistics FastAPI
+FROM python:3.11-slim
 
-# Set working directory
 WORKDIR /app
 
-# Install system dependencies (minimal)
+# Install dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
+    bash \
+    postgresql-client \
+    gcc \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy requirements and install
+# Copy requirements
 COPY requirements.txt .
+
+# Install Python packages
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application files
-COPY app.py .
 COPY pydantic_agents.py .
-COPY scenarios_examples.py .
-COPY prompt_engineering.py .
-COPY chroma_db_manager.py .
+COPY models.py .
+COPY database.py .
+COPY main.py .
+COPY entrypoint.sh .
+COPY alembic.ini .
+COPY alembic/ ./alembic/
 COPY logistics_docs/ ./logistics_docs/
-COPY run.sh .
-RUN chmod +x run.sh
 
-# Create non-root user for security
+# Make entrypoint executable
+RUN chmod +x entrypoint.sh
+
+# Create chroma_db directory
+RUN mkdir -p ./chroma_db
+
+# Create non-root user
 RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
 USER appuser
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "from pydantic_agents import check_ollama_status; check_ollama_status()" || exit 1
-
-# Set environment variables
+# Environment
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
+ENV ENVIRONMENT=production
+ENV HOST=0.0.0.0
+ENV PORT=8000
 
-# Run startup script
-CMD ["./run.sh"]
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+    CMD curl -f http://localhost:8000/health || exit 1
+
+# Expose
+EXPOSE 8000
+
+# Run entrypoint script
+CMD ["/bin/bash", "entrypoint.sh"]

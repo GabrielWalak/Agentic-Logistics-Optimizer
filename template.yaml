@@ -1,0 +1,277 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+
+Description: 'Agentic Logistics Optimizer - Serverless API on AWS Lambda'
+
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 3008
+    Runtime: python3.11
+    Architectures:
+      - x86_64
+    Environment:
+      Variables:
+        ENVIRONMENT: !Ref Environment
+        LOG_LEVEL: !Ref LogLevel
+        GITHUB_MODEL: !Ref GitHubModel
+        GITHUB_MODELS_BASE_URL: !Ref GitHubModelsBaseUrl
+        AWS_REGION: !Ref AWS::Region
+        DYNAMODB_TABLE: !Ref DecisionsTable
+        S3_BUCKET: !Ref ResultsBucket
+
+Parameters:
+  Environment:
+    Type: String
+    Default: production
+    AllowedValues:
+      - development
+      - staging
+      - production
+    Description: Environment name
+
+  LogLevel:
+    Type: String
+    Default: info
+    AllowedValues:
+      - debug
+      - info
+      - warning
+      - error
+    Description: CloudWatch log level
+
+  GitHubModel:
+    Type: String
+    Default: gpt-4o-mini
+    Description: GitHub Models model name
+
+  GitHubModelsBaseUrl:
+    Type: String
+    Default: https://models.inference.ai.azure.com
+    Description: GitHub Models API base URL
+
+Resources:
+  # ===== LAMBDA FUNCTION =====
+
+  AgenticLogisticsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub 'agentic-logistics-api-${Environment}'
+      CodeUri: .
+      Handler: lambda_handler.lambda_handler
+      Description: Multi-agent logistics optimization system
+      
+      # VPC Configuration (optional - if you need RDS/private resources)
+      # VpcConfig:
+      #   SecurityGroupIds:
+      #     - !Ref LambdaSecurityGroup
+      #   SubnetIds:
+      #     - !Ref PrivateSubnet1
+      #     - !Ref PrivateSubnet2
+
+      # Ephemeral storage for large models (if needed)
+      EphemeralStorage:
+        Size: 10240  # 10GB
+
+      # Environment secrets
+      Secrets:
+        GITHUB_TOKEN: !Sub '${GitHubTokenSecret}:GITHUB_TOKEN::'
+
+      # IAM role with permissions
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref DecisionsTable
+        - S3CrudPolicy:
+            BucketName: !Ref ResultsBucket
+        - CloudWatchPutMetricPolicy: {}
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - logs:CreateLogGroup
+                - logs:CreateLogStream
+                - logs:PutLogEvents
+              Resource: !GetAtt AgenticLogisticsLogGroup.Arn
+            - Effect: Allow
+              Action:
+                - xray:PutTraceSegments
+                - xray:PutTelemetryRecords
+              Resource: '*'
+
+      # API Gateway integration
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            RestApiId: !Ref ApiGateway
+            Path: /{proxy+}
+            Method: ANY
+
+      # CloudWatch Logs
+      LoggingConfig:
+        LogFormat: JSON
+        LogGroup: !Ref AgenticLogisticsLogGroup
+
+      # Tracing
+      Tracing: Active
+
+  # ===== API GATEWAY =====
+
+  ApiGateway:
+    Type: AWS::Serverless::Api
+    Properties:
+      Name: !Sub 'agentic-logistics-${Environment}'
+      StageName: !Ref Environment
+      TracingEnabled: true
+      MethodSettings:
+        - ResourcePath: '/*'
+          HttpMethod: '*'
+          LoggingLevel: INFO
+          DataTraceEnabled: true
+          MetricsEnabled: true
+      AccessLogSetting:
+        DestinationArn: !GetAtt ApiLogGroup.Arn
+        Format: >
+          {
+            "requestId": "$context.requestId",
+            "ip": "$context.identity.sourceIp",
+            "method": "$context.httpMethod",
+            "path": "$context.resourcePath",
+            "status": "$context.status",
+            "latency": "$context.integration.latency",
+            "error": "$context.error.message"
+          }
+
+  # ===== DYNAMODB TABLE =====
+
+  DecisionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub 'agentic-logistics-decisions-${Environment}'
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: request_id
+          AttributeType: S
+        - AttributeName: timestamp
+          AttributeType: S
+      KeySchema:
+        - AttributeName: request_id
+          KeyType: HASH
+        - AttributeName: timestamp
+          KeyType: RANGE
+      StreamSpecification:
+        StreamViewType: NEW_AND_OLD_IMAGES
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      TTL:
+        AttributeName: ttl
+        Enabled: true
+      Tags:
+        - Key: Environment
+          Value: !Ref Environment
+
+  # ===== S3 BUCKET =====
+
+  ResultsBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub 'agentic-logistics-results-${AWS::AccountId}-${AWS::Region}'
+      VersioningConfiguration:
+        Status: Enabled
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOldVersions
+            NoncurrentVersionExpirationInDays: 90
+            Status: Enabled
+          - Id: ArchiveOldDecisions
+            ExpirationInDays: 365
+            Status: Enabled
+            Prefix: decisions/
+
+  # ===== CLOUDWATCH LOGS =====
+
+  AgenticLogisticsLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/agentic-logistics-api-${Environment}'
+      RetentionInDays: 30
+
+  ApiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/apigateway/agentic-logistics-${Environment}'
+      RetentionInDays: 7
+
+  # ===== CLOUDWATCH ALARMS =====
+
+  FunctionErrorAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'agentic-logistics-errors-${Environment}'
+      AlarmDescription: Alert when Lambda errors spike
+      MetricName: Errors
+      Namespace: AWS/Lambda
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 5
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref AgenticLogisticsFunction
+
+  FunctionDurationAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub 'agentic-logistics-duration-${Environment}'
+      AlarmDescription: Alert when Lambda execution time is high
+      MetricName: Duration
+      Namespace: AWS/Lambda
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 2
+      Threshold: 25000  # 25 seconds
+      ComparisonOperator: GreaterThanThreshold
+      Dimensions:
+        - Name: FunctionName
+          Value: !Ref AgenticLogisticsFunction
+
+  # ===== SECRETS MANAGER =====
+
+  GitHubTokenSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: !Sub '/agentic-logistics/${Environment}/github-token'
+      Description: GitHub Models API token
+      SecretString: !Sub |
+        {
+          "GITHUB_TOKEN": "${GitHubToken}"
+        }
+
+  # ===== OUTPUTS =====
+
+Outputs:
+  ApiEndpoint:
+    Description: API Gateway endpoint URL
+    Value: !Sub 'https://${ApiGateway}.execute-api.${AWS::Region}.amazonaws.com/${Environment}'
+
+  FunctionArn:
+    Description: Lambda function ARN
+    Value: !GetAtt AgenticLogisticsFunction.Arn
+
+  DynamoDBTable:
+    Description: DynamoDB decisions table
+    Value: !Ref DecisionsTable
+
+  S3Bucket:
+    Description: Results S3 bucket
+    Value: !Ref ResultsBucket
+
+  LogGroup:
+    Description: CloudWatch log group
+    Value: !Ref AgenticLogisticsLogGroup

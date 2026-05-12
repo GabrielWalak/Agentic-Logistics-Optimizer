@@ -4,9 +4,16 @@ Enterprise-grade agent architecture with specialized responsibilities
 Using direct Ollama API for reliability
 """
 import os
+import sys
 import time
 import re
 import hashlib
+
+# Fix encoding on Windows
+if sys.platform == 'win32':
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict
 from openai import OpenAI
@@ -565,24 +572,14 @@ def run_multi_agent_analysis_parallel(scenario: DeliveryScenario) -> IntegratedD
 
 # Test if Ollama is available
 def check_ollama_status() -> bool:
-    """Check if GitHub Models endpoint is reachable (kept name for compatibility)."""
-    try:
-        client = _get_github_client()
-        model_name = os.getenv("GITHUB_MODEL", "gpt-4o-mini")
-        _ = client.chat.completions.create(
-            model=model_name,
-            messages=[{"role": "user", "content": "reply with OK"}],
-            max_tokens=8,
-            temperature=0.0,
-        )
-        print(f"✓ GitHub Models connected. Model: {model_name}")
-        print("\n🔧 Features:")
-        print(f"  {'✓' if rag_cache.enabled else '✗'} Redis cache: {'enabled' if rag_cache.enabled else 'disabled'}")
-        print(f"  {'✓' if LANGSMITH_AVAILABLE and os.getenv('LANGSMITH_API_KEY') else '✗'} LangSmith tracing: {'enabled' if LANGSMITH_AVAILABLE and os.getenv('LANGSMITH_API_KEY') else 'disabled'}")
-        return True
-    except Exception as e:
-        print(f"⚠ GitHub Models not available: {e}")
-        return False
+    """Check if GitHub Models endpoint is reachable (kept name for compatibility).
+    
+    NOTE: On startup, we don't block waiting for API checks - just return False
+    to avoid delaying server startup. Real LLM checks happen during requests.
+    """
+    # Don't perform actual LLM check on startup - it blocks the server
+    # The system handles LLM unavailability gracefully during requests
+    return False  # Assume not available on startup, will retry on first request
 
 
 if __name__ == "__main__":
@@ -592,17 +589,19 @@ if __name__ == "__main__":
         print("❌ Please start Ollama first")
         exit(1)
 
-# Test scenario
-scenario = DeliveryScenario(
-    predicted_days=8.5,
-    promised_days=7.0,
-    distance_km=450,
-    weight_g=1200,
-    payment_lag_days=2,
-    is_weekend_order=0,
-    freight_value=45.00,
-    rag_context="Standard carrier rules apply. Regional delivery expected."
-)
+    # Test scenario
+    scenario = DeliveryScenario(
+        predicted_days=8.5,
+        promised_days=7.0,
+        distance_km=450,
+        weight_g=1200,
+        payment_lag_days=2,
+        is_weekend_order=0,
+        freight_value=45.00,
+        rag_context="Standard carrier rules apply. Regional delivery expected."
+    )
 
-result = run_multi_agent_analysis_parallel(scenario)
-print(result)
+    result = run_multi_agent_analysis_parallel(scenario)
+    print(result)
+
+

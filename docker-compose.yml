@@ -1,37 +1,99 @@
-version: '3.8'
-
 services:
-  agentic-app:
-    build: .
-    container_name: agentic-ai-logistics
+  # PostgreSQL Database
+  db:
+    image: postgres:16-alpine
+    container_name: agentic-postgres
     environment:
-      - GITHUB_TOKEN=${GITHUB_TOKEN}
-      - GITHUB_MODELS_BASE_URL=https://models.inference.ai.azure.com
-      - GITHUB_MODEL=gpt-4o-mini
-      - LLM_TEMPERATURE=0.7
-      - LLM_TOP_P=0.9
-      - LLM_MAX_TOKENS=1000
-      - REDIS_ENABLED=false
+      POSTGRES_USER: ${POSTGRES_USER:-agentic_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-agentic_password}
+      POSTGRES_DB: ${POSTGRES_DB:-logistics_app}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - agentic-network
+
+  # Redis Cache
+  redis:
+    image: redis:7-alpine
+    container_name: agentic-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - agentic-network
+
+  # FastAPI Application
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: agentic-logistics-api
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      # Database
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-agentic_user}:${POSTGRES_PASSWORD:-agentic_password}@db:5432/${POSTGRES_DB:-logistics_app}
+      DB_HOST: db
+      DB_USER: ${POSTGRES_USER:-agentic_user}
+      
+      # Redis
+      REDIS_URL: redis://redis:6379/0
+      
+      # API Keys
+      GITHUB_TOKEN: ${GITHUB_TOKEN}
+      GITHUB_MODEL: ${GITHUB_MODEL:-gpt-4o-mini}
+      API_KEY: ${API_KEY}
+      
+      # Environment
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      
+      # AWS (optional, for future Bedrock integration)
+      AWS_REGION: ${AWS_REGION:-eu-central-1}
+      LLM_PROVIDER: ${LLM_PROVIDER:-github}
+      
+      PYTHONUNBUFFERED: 1
+      PYTHONDONTWRITEBYTECODE: 1
     env_file:
       - .env
+    ports:
+      - "8000:8000"
     volumes:
-      - ./logistics_docs:/app/logistics_docs:ro
       - ./chroma_db:/app/chroma_db
-    stdin_open: true
-    tty: true
-    restart: unless-stopped
+      - ./logistics_docs:/app/logistics_docs:ro
+    entrypoint: /bin/bash
+    command: entrypoint.sh
+    networks:
+      - agentic-network
     healthcheck:
-      test: ["CMD", "python", "-c", "from pydantic_agents import check_ollama_status; check_ollama_status()"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 10s
-    # Resource limits for t3.micro
-    deploy:
-      resources:
-        limits:
-          cpus: '1.0'
-          memory: 800M
-        reservations:
-          cpus: '0.5'
-          memory: 400M
+      start_period: 15s
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  agentic-network:
+    driver: bridge
