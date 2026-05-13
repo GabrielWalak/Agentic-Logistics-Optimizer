@@ -34,6 +34,7 @@ from pydantic_agents import (
     LLMError,
 )
 from prompt_engineering import ResponseGrader
+from ml_predictor import predict_delivery_days, get_model_info
 from models import AuditLog
 from database import get_session, init_db
 
@@ -109,14 +110,14 @@ async def rate_limit_check() -> bool:
 class AnalysisRequest(BaseModel):
     """Delivery scenario analysis request"""
 
-    predicted_days: float = Field(description="Predicted delivery time in days")
+    predicted_days: Optional[float] = Field(default=None, description="Predicted delivery time (auto-calculated by ML model if omitted)")
     promised_days: float = Field(default=7.0, description="Promised delivery time")
     distance_km: float = Field(description="Distance in kilometers")
     weight_g: float = Field(description="Package weight in grams")
     freight_value: float = Field(description="Freight cost in USD")
     payment_lag_days: int = Field(default=2, description="Payment lag in days")
     is_weekend_order: int = Field(default=0, description="Weekend order flag")
-    rag_context: str = Field(default="Standard carrier rules apply", description="RAG context")
+    rag_context: str = Field(default="Standard carrier rules apply", description="RAG context (auto-retrieved if not provided)")
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -868,15 +869,44 @@ async def analyze_delivery(
     start_time = time.perf_counter()
 
     try:
+        # Auto-predict delivery days if not provided or use ML model
+        predicted_days = request_body.predicted_days
+        ml_used = False
+        if predicted_days is None or predicted_days <= 0:
+            ml_prediction = predict_delivery_days(
+                distance_km=request_body.distance_km,
+                weight_g=request_body.weight_g,
+                freight_value=request_body.freight_value,
+                payment_lag_days=request_body.payment_lag_days,
+                is_weekend_order=request_body.is_weekend_order,
+            )
+            if ml_prediction is not None:
+                predicted_days = ml_prediction
+                ml_used = True
+            else:
+                predicted_days = 7.0  # Safe default
+
+        # Auto-retrieve RAG context if not provided
+        rag_context = request_body.rag_context
+        if rag_context == "Standard carrier rules apply":
+            rag_context = _get_rag_context(
+                distance_km=request_body.distance_km,
+                weight_g=request_body.weight_g,
+                payment_lag_days=request_body.payment_lag_days,
+                is_weekend_order=request_body.is_weekend_order,
+                predicted_days=predicted_days,
+                promised_days=request_body.promised_days,
+            )
+
         scenario = DeliveryScenario(
-            predicted_days=request_body.predicted_days,
+            predicted_days=predicted_days,
             promised_days=request_body.promised_days,
             distance_km=request_body.distance_km,
             weight_g=request_body.weight_g,
             payment_lag_days=request_body.payment_lag_days,
             is_weekend_order=request_body.is_weekend_order,
             freight_value=request_body.freight_value,
-            rag_context=request_body.rag_context,
+            rag_context=rag_context,
         )
 
         decision = await asyncio.to_thread(run_multi_agent_analysis_parallel, scenario)
@@ -1023,6 +1053,77 @@ async def batch_analyze(
         await app_state.increment_request(processing_time_ms, success=False)
         logger.error("Batch analysis failed", request_id=request_id, error=str(e))
         raise HTTPException(status_code=500, detail="Batch processing failed")
+
+
+# ===== RAG CONTEXT RETRIEVAL =====
+
+def _get_rag_context(
+    distance_km: float,
+    weight_g: float,
+    payment_lag_days: int,
+    is_weekend_order: int,
+    predicted_days: float,
+    promised_days: float,
+) -> str:
+    """Retrieve relevant knowledge base context using ChromaDB."""
+    try:
+        from chroma_db_manager import ChromaDBManager
+        manager = ChromaDBManager()
+
+        # Ensure indexed
+        if manager.collection.count() == 0:
+            manager.index_knowledge_base()
+
+        context = manager.get_relevant_context(
+            predicted_days=predicted_days,
+            promised_days=promised_days,
+            input_data={
+                "distance_km": distance_km,
+                "product_weight_g": weight_g,
+                "payment_lag_days": payment_lag_days,
+                "is_weekend_order": is_weekend_order,
+            },
+        )
+        return context if context else "Standard carrier rules apply"
+    except Exception as e:
+        # Fallback if ChromaDB not available
+        return "Standard carrier rules apply"
+
+
+# ===== ML PREDICTION ENDPOINT =====
+
+class PredictRequest(BaseModel):
+    """Request for ML delivery time prediction."""
+    distance_km: float = Field(description="Distance in km")
+    weight_g: float = Field(description="Package weight in grams")
+    freight_value: float = Field(description="Freight cost")
+    payment_lag_days: int = Field(default=0, description="Payment lag in days")
+    is_weekend_order: int = Field(default=0, description="Weekend order flag")
+    purchase_month: int = Field(default=6, description="Month of purchase (1-12)")
+
+
+@app.post("/predict", tags=["ML"])
+async def predict_delivery(request_body: PredictRequest) -> Dict[str, Any]:
+    """Predict delivery time using XGBoost model trained on Olist data.
+    
+    Returns predicted days and model metadata.
+    """
+    prediction = predict_delivery_days(
+        distance_km=request_body.distance_km,
+        weight_g=request_body.weight_g,
+        freight_value=request_body.freight_value,
+        payment_lag_days=request_body.payment_lag_days,
+        is_weekend_order=request_body.is_weekend_order,
+        purchase_month=request_body.purchase_month,
+    )
+
+    if prediction is None:
+        raise HTTPException(status_code=503, detail="ML model not available")
+
+    return {
+        "predicted_days": prediction,
+        "model_info": get_model_info(),
+    }
 
 
 # ===== DEMO ENDPOINT (public, rate-limited, predefined scenarios only) =====

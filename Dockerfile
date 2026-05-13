@@ -20,9 +20,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application files
 COPY pydantic_agents.py .
 COPY prompt_engineering.py .
+COPY ml_predictor.py .
+COPY chroma_db_manager.py .
 COPY models.py .
 COPY database.py .
 COPY main.py .
+COPY logistics_knowledge_base.py .
 COPY entrypoint.sh .
 COPY alembic.ini .
 COPY alembic/ ./alembic/

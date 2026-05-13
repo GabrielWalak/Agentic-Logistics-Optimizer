@@ -12,7 +12,11 @@ import hashlib
 # Fix encoding on Windows
 if sys.platform == 'win32':
     import io
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+    if not isinstance(sys.stdout, io.TextIOWrapper) or sys.stdout.encoding != 'utf-8':
+        try:
+            sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+        except (AttributeError, ValueError):
+            pass  # Skip if stdout is already wrapped or unavailable (e.g., pytest)
 
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict
