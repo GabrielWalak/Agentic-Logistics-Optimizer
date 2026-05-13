@@ -24,7 +24,6 @@ numpy==1.26.2
 
 # RAG / Vector Store
 chromadb==0.4.22
-sentence-transformers==2.2.2
 
 # Monitoring & Tracing
 langsmith==0.6.8

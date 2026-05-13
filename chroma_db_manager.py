@@ -56,17 +56,11 @@ class ChromaDBManager:
             print(f"✓ Loaded existing collection: {self.collection_name}")
             return collection
         except Exception:
-            # Create new collection with sentence transformers
+            # Create new collection with default embeddings (no torch needed)
             print(f"✓ Creating new collection: {self.collection_name}")
-            
-            # Use sentence transformers (lightweight, no Ollama needed)
-            embedding_fn = embedding_functions.SentenceTransformerEmbeddingFunction(
-                model_name=self.embedding_model
-            )
             
             collection = self.client.create_collection(
                 name=self.collection_name,
-                embedding_function=embedding_fn,
                 metadata={"description": "OLIST Logistics Knowledge Base"}
             )
             return collection
