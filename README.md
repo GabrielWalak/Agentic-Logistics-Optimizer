@@ -1,348 +1,194 @@
-# AgenticAI Logistics Optimizer - Multi-Agent AI System
+# Multi-Agent Logistics AI System
 
-Advanced multi-agent architecture for intelligent logistics optimization using Retrieval-Augmented Generation (RAG), prompt engineering, and behavioral evaluation.
+Enterprise-grade multi-agent AI system for real-time logistics decision-making. Four specialized LLM agents work in parallel to analyze delivery scenarios, optimize carrier selection, design customer recovery strategies, and produce integrated decisions with confidence scoring.
 
-**Status:** ✅ Core AI system complete. Multi-agent orchestration + RAG + Eval framework ready for integration.
-
-### 🛠️ Tech Stack
-* **Core:** Python 3.11, FastAPI, Pydantic V2
-* **AI & LLM:** GitHub Models API (gpt-4o-mini), OpenAI SDK, ChromaDB (Vector Store), Prompt Engineering
-* **Architecture:** Multi-Agent Orchestration, RAG (Retrieval-Augmented Generation), LLM-as-a-Judge
-* **Infrastructure:** Docker, AWS EC2 (t3.micro), Environment Variables (.env)
+**Live Demo:** [http://46.101.179.137:8000](http://46.101.179.137:8000) (password-protected)
 
 ---
 
-## 🧠 AI/ML Architecture
-
-### 1. Multi-Agent Orchestration
-
-Four specialized agents work in parallel, each optimizing a different logistics dimension:
+## Architecture
 
 ```
-Logistics Scenario Input
-    ↓ (ThreadPoolExecutor)
-┌───────────────────────────────────────┐
-│  Risk Assessment Agent                │  Analyzes: Distance, weight, time buffer, payment terms
-│  ├─ Score: 0-100 (risk level)        │  Output: Risk factors + mitigation strategy
-│  └─ Logic: Constraint validation      │
-│                                       │
-│  Carrier Selection Agent              │  Analyzes: Cost optimization, capacity, reliability  
-│  ├─ Score: ROI ranking               │  Output: Carrier recommendation + cost analysis
-│  └─ Logic: Upgrade trigger matrix    │
-│                                       │
-│  Recovery Strategy Agent              │  Analyzes: Delay scenarios, customer retention
-│  ├─ Score: Recovery effectiveness    │  Output: Discount strategy + retention metrics
-│  └─ Logic: Voucher value calculation │
-│                                       │
-│  Decision Integration Agent           │  Synthesizes: All agent outputs into final recommendation
-│  ├─ Confidence: 0-100%               │  Output: Prioritized actions + expected outcomes
-│  └─ Logic: Cross-agent conflict reso │
-└───────────────────────────────────────┘
-    ↓
-Response Grading (AI Evaluation)
-    ↓
-Final Logistics Decision
+Delivery Scenario Input (distance, weight, time, payment)
+        │
+        ▼
+┌─ Agent 1: Risk Assessment ──────────── Score: 0-100, risk factors
+│       │
+│       ├── Agent 2: Carrier Optimization ── ROI analysis (parallel)
+│       │
+│       └── Agent 3: Recovery Strategy ───── Voucher logic (parallel)
+│               │
+│               ▼
+└─ Agent 4: Decision Orchestrator ────── Executive summary + confidence
+                │
+                ▼
+        Response Grader ──────────────── Behavioral validation (0-100)
+                │
+                ▼
+        Final Decision + Grading Score
 ```
 
-**Performance:** All 4 agents run in parallel (~10-20s total execution)
+- **Agent 1** runs first (risk assessment feeds into other agents)
+- **Agents 2 & 3** run in parallel via `ThreadPoolExecutor`
+- **Agent 4** integrates all outputs into a cohesive action plan
+- **Response Grader** validates logical correctness (not just JSON format)
 
 ---
 
-### 2. Retrieval-Augmented Generation (RAG)
+## Tech Stack
 
-Knowledge base integration for contextual decision making:
-
-```
-Logistics Documents (ChromaDB Vector Store)
-├── carrier_rules.txt          # Carrier selection constraints
-├── distance_guidelines.txt    # Distance-based routing logic  
-├── weight_volume_rules.txt    # Capacity constraints
-├── payment_lag_impact.txt     # Payment timing effects
-├── customer_recovery.txt      # Recovery strategy templates
-└── weekend_holidays.txt       # Business day calculations
-
-    ↓ (Semantic Search)
-
-Agent Query: "What's the carrier upgrade threshold for 2800km?"
-    ↓
-ChromaDB retrieves: Related rules + historical patterns
-    ↓
-LLM (gpt-4o-mini) synthesizes: Context-aware answer
-```
-
-**Implementation:**
-- Vector embeddings: OpenAI Ada embeddings (async)
-- Similarity search: Cosine distance (top-3 results)
-- Context window: Up to 4 relevant documents per query
-- Update mechanism: Rebuild on document changes
+| Layer | Technology |
+|-------|-----------|
+| **LLM** | GPT-4o-mini via GitHub Models API |
+| **Framework** | FastAPI + Pydantic V2 |
+| **Architecture** | Multi-Agent Orchestration (4 agents) |
+| **Knowledge Base** | RAG + ChromaDB Vector Store |
+| **Database** | PostgreSQL + SQLModel (async) |
+| **Cache** | Redis (response caching) |
+| **Infrastructure** | Docker + DigitalOcean |
+| **Observability** | LangSmith + Structured JSON Logging |
+| **Evaluation** | Behavioral Grading Framework |
+| **Security** | API Key Auth + Basic Auth (portfolio) |
+| **Prompt Engineering** | V2 Optimized with constraint validation |
 
 ---
 
-### 3. Prompt Engineering (V2 Optimized)
+## Key Features
 
-Structured prompts for consistent, validated outputs:
+- **Real-time AI Analysis** — 4 LLM calls in ~12-15s with parallel execution
+- **Behavioral Grading** — validates logic consistency, not just output format (score-level alignment, factor specificity, ROI analysis)
+- **Retry Logic** — exponential backoff with 3 attempts per LLM call
+- **RAG Integration** — 6 logistics knowledge base documents for context-aware decisions
+- **Live Demo** — interactive portfolio page with 3 predefined scenarios (HIGH/MODERATE/LOW risk)
+- **Audit Trail** — PostgreSQL JSONB storage for all requests/responses
 
-```
-AGENT PROMPT TEMPLATE:
-1. ROLE: [Clear agent identity]
-2. CONTEXT: [Business constraints from RAG]
-3. INPUT: [Structured scenario data (distance, weight, etc)]
-4. OUTPUT_FORMAT: [JSON schema with required fields]
-5. VALIDATION_RULES: [Logic gates (e.g., cost > 0 if upgrade=true)]
-6. EXAMPLES: [Few-shot examples of good vs bad responses]
-```
+---
 
-**V2 Features:**
-- Pydantic models for type-safe parsing
-- Explicit JSON schema in prompt
-- Constraint validation in response
-- Few-shot learning with real examples
-- Temperature: 0.3 (consistency over creativity)
+## API Endpoints
 
-**Example output:**
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| `GET` | `/` | Basic Auth | Portfolio page with live demo |
+| `POST` | `/analyze` | API Key | Full multi-agent analysis |
+| `POST` | `/batch-analyze` | API Key | Batch processing (up to 100) |
+| `POST` | `/demo/analyze` | None | Public demo (predefined scenarios only) |
+| `GET` | `/health` | None | Health check |
+| `GET` | `/status` | None | Runtime metrics |
+| `GET` | `/docs` | None | Swagger UI |
+
+---
+
+## Response Example
+
 ```json
 {
-  "risk_score": 78,
-  "risk_level": "HIGH",
-  "factors": [
-    {"factor": "Distance", "impact": "2800km > 2000km threshold"},
-    {"factor": "Time Buffer", "impact": "12.5 vs 7 days = 5.5 buffer (marginal)"}
-  ],
-  "mitigation": "Upgrade to overnight carrier + customer notification",
-  "confidence": 0.87
+  "request_id": "14a8b690-...",
+  "decision": {
+    "risk_assessment": {
+      "risk_level": "HIGH",
+      "risk_score": 75.0,
+      "primary_risk_factors": ["Long distance (2800km)", "Heavy weight (4500g)", "Weekend order"],
+      "analysis": "The predicted delivery time of 12.5 days significantly exceeds..."
+    },
+    "carrier_recommendation": {
+      "recommended_carrier": "Premium Express",
+      "should_upgrade": true,
+      "cost_impact": 50.0,
+      "roi_analysis": "ROI = (200 - 50) / 50 = 300%. Strong financial justification."
+    },
+    "recovery_plan": {
+      "voucher_code": "DELAY25",
+      "discount_percentage": 25.0,
+      "retention_probability": 70.0
+    },
+    "executive_summary": "Risk level HIGH (75/100). Carrier upgrade to Premium Express recommended...",
+    "confidence_score": 85.0
+  },
+  "grading": {
+    "overall_score": 97.7,
+    "quality_level": "Excellent"
+  },
+  "processing_time_ms": 12500
 }
 ```
 
 ---
 
-### 4. Response Evaluation & Grading
+## Grading Framework
 
-Behavioral evaluation framework that validates AI logic, not just output format:
+The system evaluates AI response quality across multiple dimensions:
 
-#### Grading Dimensions
-
-**A. Score-Level Alignment (25 points)**
-- Validates: Risk score 78 matches HIGH level (61-80 range)
-- Penalty: -15 if misaligned (e.g., score 45 but label "HIGH")
-
-**B. Factors Specificity (20 points)**  
-- Requires: Measurable factors with units (km, kg, days)
-- ✅ Good: "2800km exceeds 2000km threshold"
-- ❌ Bad: "Risk factor 1 is significant"
-- Penalty: -20 for vague factors
-
-**C. Analysis Depth (15 points)**
-- Requires: >80 words + minimum 2 sentences
-- Penalty: -15 for shallow analysis
-
-**D. Logic Consistency (20 points)**
-- Carrier: If upgrade=true, must have cost>0
-- Recovery: Discount % must match voucher logic
-- Penalty: -20 for logical errors
-
-**E. Recovery Alignment (15 points)**
-- Validates: Discount tier matches customer lifetime value
-- Penalty: -10 for misaligned recovery strategy
-
-**F. Actionability (5 points)**
-- Requires: Clear next step recommendations
-- Penalty: -5 if vague
-
-**Scoring Examples:**
-```
-Good Response:  85/100
-├─ Score-Level: ✓ (25/25)
-├─ Specificity: ✓ (20/20)
-├─ Depth: ✓ (15/15)
-├─ Logic: ✓ (20/20)
-├─ Recovery: ✓ (5/5) 
-└─ Deductions: None
-
-Bad Response: 15/100
-├─ Score-Level: ❌ (10/25) - 45 score but "HIGH" label
-├─ Specificity: ❌ (0/20) - Generic factors only
-├─ Depth: ❌ (5/15) - 40 words, 1 sentence
-├─ Logic: ❌ (0/20) - upgrade=true but cost=0
-└─ Deductions: ⚠️ Logic errors, vague analysis
-```
+| Dimension | Points | Validates |
+|-----------|--------|-----------|
+| Score-Level Alignment | 25 | risk_score matches risk_level range |
+| Factor Specificity | 20 | Measurable factors with units (km, kg, days) |
+| Logic Consistency | 20 | upgrade=true → cost>0, discount matches voucher |
+| ROI Analysis | 25 | Numerical cost-benefit calculation |
+| Analysis Depth | 15 | >80 words, minimum 2 sentences |
 
 ---
 
-## 📊 System Components
+## ML Model Context
 
-### Core Files
+The delivery time prediction model is trained on the **Brazilian E-Commerce (Olist) dataset** (~100k orders, 2016-2018).
 
-| File | Role | Type |
-|------|------|------|
-| **pydantic_agents.py** | Multi-agent orchestrator | Framework |
-| **prompt_engineering.py** | Prompts V2 + ResponseGrader | ML Logic |
-| **chroma_db_manager.py** | RAG/Vector store manager | Data Layer |
-| **logistics_knowledge_base.py** | Document loader | Data Prep |
-| **scenarios_examples.py** | Test cases (HIGH/LOW/MID risk) | Testing |
-| **app.py** | Interactive CLI | Interface |
-| **test_grader.py** | Grading validation | Testing |
-
-### Data Flow
-
-```
-Raw Scenario
-    ↓
-[Pydantic Validation] ← scenarios_examples.py
-    ↓
-[Multi-Agent Processing] ← pydantic_agents.py
-    ├─ retrieve_context() ← chroma_db_manager.py
-    ├─ call_ollama() ← GitHub Models API (gpt-4o-mini)
-    └─ ThreadPoolExecutor (parallel execution)
-    ↓
-[Agent Responses (JSON)]
-    ↓
-[Response Grading] ← prompt_engineering.py / ResponseGrader
-    ├─ Validate score-level alignment
-    ├─ Check factor specificity
-    ├─ Measure analysis depth
-    └─ Verify logic consistency
-    ↓
-[Final Score: 0-100] + Deductions breakdown
-    ↓
-[User Decision Support]
-```
+**Known limitations:** Does not account for real-time weather, carrier fleet availability, traffic disruptions, or holiday surges. In production, the system would integrate live carrier APIs and weather data.
 
 ---
 
-## 🧪 Evaluation Examples
+## Local Development
 
-### Test Scenario 1: HIGH RISK
-```
-Distance: 2800km | Weight: 4500g | Time: 12.5 vs 7 days | Payment: 5-day lag
-
-Agent Outputs:
-├─ Risk: 78/100 ("HIGH", factors: distance + time buffer marginal)
-├─ Carrier: Upgrade to overnight (+$450 cost, ROI 1.8x)
-├─ Recovery: 15% voucher if delayed (retention priority)
-└─ Decision: UPGRADE recommended
-
-Grading: 85/100 ✅
-├─ Score-Level: ✓ (78 = HIGH range)
-├─ Specificity: ✓ (concrete km/day metrics)
-└─ Logic: ✓ (upgrade cost justified)
-```
-
-### Test Scenario 2: LOW RISK  
-```
-Distance: 45km | Weight: 300g | Time: 2 vs 3 days | Payment: instant
-
-Agent Outputs:
-├─ Risk: 22/100 ("LOW", factors: short distance + time buffer 1 day)
-├─ Carrier: Standard shipping ($0 uplift)
-├─ Recovery: 5% courtesy discount (loyalty build)
-└─ Decision: MAINTAIN standard
-
-Grading: 88/100 ✅
-├─ Score-Level: ✓ (22 = LOW range)
-├─ Specificity: ✓ (distance buffer clearly stated)
-└─ Logic: ✓ (no upgrade needed, costs optimized)
-```
-
-### Test Scenario 3: MODERATE RISK
-```
-Distance: 650km | Weight: 2000g | Time: 6.5 vs 6 days | Payment: 3-day lag
-
-Agent Outputs:
-├─ Risk: 58/100 ("MODERATE", factors: margin 0.5 days tight)
-├─ Carrier: Conditional upgrade (on payment delay > 2 days)
-├─ Recovery: 10% voucher if any delay observed
-└─ Decision: MONITOR with escalation plan
-
-Grading: 82/100 ✅
-├─ Score-Level: ✓ (58 = MODERATE range)
-├─ Specificity: ✓ (payment lag conditional logic)
-└─ Logic: ✓ (escalation rules clear)
-```
-
----
-
-## 🔄 Key Features
-
-### Parallel Execution
-```python
-ThreadPoolExecutor (max_workers=4)
-├─ Risk Assessment (async)
-├─ Carrier Selection (async)
-├─ Recovery Strategy (async)
-└─ Decision Integration (async)
-Total time: ~10-20s (vs ~40-80s sequential)
-```
-
-### Behavioral Validation
-- Not just "is JSON valid?" but "does the logic make sense?"
-- Detects hallucinations (e.g., score doesn't match risk level)
-- Verifies cross-agent consistency (recovery aligns with risk)
-
-### RAG Context Awareness
-- Agents ground decisions in knowledge base
-- Dynamic document retrieval per query
-- Semantic similarity matching (not keyword)
-
-### Type Safety
-- Pydantic models for all inputs/outputs
-- Runtime validation prevents malformed responses
-- Clear error messages for debugging
-
----
-
-## 📈 Performance Metrics
-
-| Metric | Value | Status |
-|--------|-------|--------|
-| Parallel execution | 10-20s | ✅ Optimized |
-| Response grading accuracy | 85/100 (good), 15/100 (bad) | ✅ Differentiates |
-| Agent consensus | 85-95% agreement | ✅ Stable |
-| RAG relevance | Top-3 results >= 0.7 similarity | ✅ Valid |
-| API reliability | GitHub Models 99.5% uptime | ✅ Tested |
-
----
-
-## 🎯 Next Steps (Feature Development)
-
-- [ ] Add FastAPI endpoints for remote agent queries
-- [ ] Implement caching layer (Redis) for repeated scenarios
-- [ ] Extend RAG to support real-time carrier pricing
-- [ ] Add A/B testing framework for prompt variations
-- [ ] Implement feedback loop for grader model retraining
-
----
-
-## 📚 How to Use
-
-### Run All Test Scenarios
 ```bash
-python -c "from scenarios_examples import run_all_scenarios; run_all_scenarios()"
-```
+# 1. Clone and setup
+git clone https://github.com/GabrielWalak/Agentic-Logistics-Optimizer.git
+cd Agentic-Logistics-Optimizer
 
-### Test Single Scenario with Grading
-```bash
-python app.py  # Menu option 2: "Run all 3 test scenarios"
-```
+# 2. Create virtual environment
+python -m venv .venv
+source .venv/bin/activate  # Linux/Mac
+# .venv\Scripts\activate   # Windows
 
-### Evaluate Response Quality
-```bash
-python test_grader.py
-```
+# 3. Install dependencies
+pip install -r requirements.txt
 
-### Check System Status
-```bash
-python app.py  # Menu option 5: "System Status"
+# 4. Configure environment
+cp .env.example .env
+# Edit .env with your GITHUB_TOKEN (needs 'models' permission)
+
+# 5. Run locally (without PostgreSQL)
+python _run_local.py
 ```
 
 ---
 
-## 🔗 Related Documentation
+## Production Deployment (Docker)
 
-- **[DEPLOYMENT.md](DEPLOYMENT.md)** - System overview & infrastructure
-- **[SECURITY.md](SECURITY.md)** - Token management & security practices
-- **[AWS_DEPLOYMENT.md](AWS_DEPLOYMENT.md)** - Cloud deployment guide
-- **[BUILD_INSTRUCTIONS.md](BUILD_INSTRUCTIONS.md)** - Local Docker build
+```bash
+# Configure .env with production values
+cp .env.example .env
+
+# Build and run
+docker-compose up -d --build
+
+# Check status
+docker logs agentic-logistics-api --tail 20
+```
+
+**Requirements:** Docker, Docker Compose, GitHub PAT with `models` permission.
 
 ---
 
-**Deep dive into the AI system architecture? Start with `pydantic_agents.py` (orchestration) and `prompt_engineering.py` (grading logic)** 🧠
+## Project Structure
+
+```
+├── main.py                    # FastAPI server + portfolio page
+├── pydantic_agents.py         # Multi-agent orchestration (4 agents)
+├── prompt_engineering.py      # Prompts V2 + ResponseGrader
+├── logistics_knowledge_base.py # RAG document loader
+├── chroma_db_manager.py       # ChromaDB vector store
+├── models.py                  # SQLModel tables (audit logs)
+├── database.py                # Async PostgreSQL connection
+├── docker-compose.yml         # PostgreSQL + Redis + App
+├── Dockerfile                 # Production container
+└── logistics_docs/            # Knowledge base documents
+```
