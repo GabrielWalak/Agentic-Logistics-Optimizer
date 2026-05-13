@@ -16,8 +16,8 @@ __pycache__/
 *$py.class
 *.so
 
-# ML model artifacts
-*.pkl
+# ML model artifacts (large, keep in repo for deployment)
+# *.pkl
 *.joblib
 *.h5
 *.onnx
