@@ -110,72 +110,108 @@ def _get_github_client() -> OpenAI:
 
 # ===== OLLAMA DIRECT API =====
 
+class LLMError(Exception):
+    """Raised when LLM call fails after all retries."""
+    pass
+
+
 def call_ollama(
     system_prompt: str,
     user_prompt: str,
     model: Optional[str] = None,
-    stream: bool = False
+    stream: bool = False,
+    max_retries: int = 3
 ) -> str:
-    """LLM API call via GitHub Models using OpenAI SDK (backward-compatible name)."""
-    try:
-        cache_key = rag_cache.make_key(system_prompt + user_prompt)
-        cached = rag_cache.get(cache_key)
-        if cached:
-            if stream:
-                print("[cached] ", end="", flush=True)
-            return cached
-
-        model_name = model or os.getenv("GITHUB_MODEL", "gpt-4o-mini")
-        client = _get_github_client()
-
-        response = client.chat.completions.create(
-            model=model_name,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-            temperature=float(os.getenv("LLM_TEMPERATURE", "0.3")),
-            max_tokens=int(os.getenv("LLM_MAX_TOKENS", "1024")),
-            top_p=float(os.getenv("LLM_TOP_P", "0.9")),
-            stream=stream,
-        )
-
+    """LLM API call via GitHub Models using OpenAI SDK (backward-compatible name).
+    
+    Raises LLMError if all retries fail, instead of returning silent fallback JSON.
+    """
+    cache_key = rag_cache.make_key(system_prompt + user_prompt)
+    cached = rag_cache.get(cache_key)
+    if cached:
         if stream:
-            full_response = ""
-            for chunk in response:
-                delta = chunk.choices[0].delta.content if chunk.choices else None
-                if delta:
-                    full_response += delta
-                    print(delta, end="", flush=True)
-            print()
-            rag_cache.set(cache_key, full_response)
-            return full_response
+            print("[cached] ", end="", flush=True)
+        return cached
 
-        result = response.choices[0].message.content or ""
-        rag_cache.set(cache_key, result)
-        return result
+    model_name = model or os.getenv("GITHUB_MODEL", "gpt-4o-mini")
+    last_error = None
 
-    except Exception as e:
-        return f'{{"error": "GitHub Models error: {str(e)}"}}'
+    for attempt in range(1, max_retries + 1):
+        try:
+            client = _get_github_client()
+
+            response = client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=float(os.getenv("LLM_TEMPERATURE", "0.3")),
+                max_tokens=int(os.getenv("LLM_MAX_TOKENS", "1024")),
+                top_p=float(os.getenv("LLM_TOP_P", "0.9")),
+                stream=stream,
+            )
+
+            if stream:
+                full_response = ""
+                for chunk in response:
+                    delta = chunk.choices[0].delta.content if chunk.choices else None
+                    if delta:
+                        full_response += delta
+                        print(delta, end="", flush=True)
+                print()
+                if not full_response.strip():
+                    raise LLMError("LLM returned empty streaming response")
+                rag_cache.set(cache_key, full_response)
+                return full_response
+
+            result = response.choices[0].message.content or ""
+            if not result.strip():
+                raise LLMError("LLM returned empty response")
+            
+            rag_cache.set(cache_key, result)
+            return result
+
+        except LLMError:
+            raise  # Don't retry on empty response (model issue, not network)
+        except Exception as e:
+            last_error = e
+            print(f"  ⚠ LLM attempt {attempt}/{max_retries} failed: {str(e)[:100]}")
+            if attempt < max_retries:
+                time.sleep(1.5 * attempt)  # Exponential backoff
+
+    # All retries exhausted
+    error_msg = f"GitHub Models API failed after {max_retries} attempts: {str(last_error)}"
+    print(f"  ❌ {error_msg}")
+    raise LLMError(error_msg)
 
 
 def parse_json_response(response: str) -> Dict:
-    """Extract JSON from LLM response (handles markdown code blocks)"""
+    """Extract JSON from LLM response (handles markdown code blocks).
+    
+    Raises ValueError if no valid JSON found.
+    """
     try:
         # Remove markdown code blocks
-        response = response.replace('```json', '').replace('```', '').strip()
+        cleaned = response.replace('```json', '').replace('```', '').strip()
         
         # Find JSON object
-        start = response.find('{')
-        end = response.rfind('}') + 1
+        start = cleaned.find('{')
+        end = cleaned.rfind('}') + 1
         if start != -1 and end > start:
-            json_str = response[start:end]
-            return json.loads(json_str)
+            json_str = cleaned[start:end]
+            parsed = json.loads(json_str)
+            if parsed:
+                return parsed
         
         # Fallback: try parsing entire response
-        return json.loads(response)
-    except:
-        return {}
+        parsed = json.loads(cleaned)
+        if parsed:
+            return parsed
+    except (json.JSONDecodeError, ValueError):
+        pass
+    
+    raise ValueError(f"Failed to parse JSON from LLM response: {response[:200]}")
 
 
 # ===== REDIS CACHE MANAGER =====
@@ -330,7 +366,7 @@ Return JSON format: {"executive_summary": "...", "estimated_delivery_time": X, "
 
 @traceable(name="risk_assessment_agent")
 def run_risk_assessment(scenario: DeliveryScenario) -> Dict:
-    """Agent 1: Risk Assessment"""
+    """Agent 1: Risk Assessment. Raises LLMError on failure."""
     user_prompt = f"""Analyze this delivery scenario:
 
 Predicted Delivery: {scenario.predicted_days} days
@@ -356,19 +392,45 @@ Provide risk assessment in JSON format."""
     factors = result.get("primary_risk_factors", [])
     if isinstance(factors, str):
         factors = [f.strip() for f in factors.split(',')]
+    if not factors:
+        # LLM didn't provide factors — generate from scenario data
+        factors = []
+        if scenario.distance_km > 1500:
+            factors.append(f"Long distance ({scenario.distance_km}km)")
+        if scenario.weight_g > 3000:
+            factors.append(f"Heavy weight ({scenario.weight_g}g)")
+        if scenario.predicted_days - scenario.promised_days > 2:
+            factors.append(f"Delivery delay ({scenario.predicted_days - scenario.promised_days:.1f} days)")
+        if scenario.payment_lag_days > 3:
+            factors.append(f"Payment lag ({scenario.payment_lag_days} days)")
+        if scenario.is_weekend_order:
+            factors.append("Weekend order")
+        if not factors:
+            factors = ["Standard delivery conditions"]
+    
+    analysis = result.get("analysis", "")
+    if not analysis or analysis == "No analysis provided":
+        # Generate meaningful analysis from data
+        delay = scenario.predicted_days - scenario.promised_days
+        analysis = (
+            f"Delivery scenario analysis: {scenario.distance_km}km distance, "
+            f"{scenario.weight_g}g weight, {delay:.1f} days potential delay. "
+            f"Payment lag of {scenario.payment_lag_days} days. "
+            f"Risk score {risk_score_value}/100 based on combined factors."
+        )
     
     return {
         "risk_level": result.get("risk_level", "MODERATE"),
         "risk_score": risk_score_value,
         "primary_risk_factors": factors,
         "mitigation_priority": coerce_to_string(result.get("mitigation_priority"), "MEDIUM"),
-        "analysis": result.get("analysis", "No analysis provided")
+        "analysis": analysis
     }
 
 
 @traceable(name="carrier_optimization_agent")
 def run_carrier_optimization(scenario: DeliveryScenario, risk: Dict) -> Dict:
-    """Agent 2: Carrier Optimization"""
+    """Agent 2: Carrier Optimization. Raises LLMError on failure."""
     user_prompt = f"""Optimize carrier selection for:
 
 Scenario:
@@ -399,19 +461,42 @@ Recommend carrier and calculate ROI in JSON format."""
     # Validate cost_impact
     cost_impact_value = coerce_to_float(result.get("cost_impact"), 35.0 if should_upgrade else 0.0)
     
+    # Ensure ROI analysis is meaningful
+    roi = result.get("roi_analysis", "")
+    if not roi or len(roi) < 10:
+        if should_upgrade:
+            roi = (
+                f"Upgrade cost R${cost_impact_value:.0f} justified by risk reduction. "
+                f"Risk level {risk['risk_level']} ({risk['risk_score']}/100) requires faster carrier "
+                f"to meet {scenario.promised_days}-day promise."
+            )
+        else:
+            roi = "Standard carrier sufficient — no upgrade cost needed for current risk level."
+    
+    # Ensure upgrade_rationale is meaningful
+    rationale = result.get("upgrade_rationale", "")
+    if not rationale or len(rationale) < 10:
+        if should_upgrade:
+            rationale = (
+                f"Risk level {risk['risk_level']} with {scenario.distance_km}km distance "
+                f"requires carrier upgrade to ensure delivery within {scenario.promised_days} days."
+            )
+        else:
+            rationale = "Current carrier meets delivery requirements at optimal cost."
+    
     return {
         "recommended_carrier": result.get("recommended_carrier", "Premium Express"),
         "current_carrier": result.get("current_carrier", "Standard Shipping"),
         "should_upgrade": should_upgrade,
-        "upgrade_rationale": result.get("upgrade_rationale", "Risk mitigation required"),
+        "upgrade_rationale": rationale,
         "cost_impact": cost_impact_value,
-        "roi_analysis": result.get("roi_analysis", "Upgrade cost justified by risk reduction")
+        "roi_analysis": roi
     }
 
 
 @traceable(name="recovery_strategy_agent")
 def run_recovery_strategy(scenario: DeliveryScenario, risk: Dict) -> Dict:
-    """Agent 3: Customer Recovery"""
+    """Agent 3: Customer Recovery. Raises LLMError on failure."""
     delay_days = scenario.predicted_days - scenario.promised_days
     
     user_prompt = f"""Design recovery strategy for:
@@ -445,11 +530,34 @@ Provide recovery plan in JSON format. Return retention_probability as percentage
     if retention_value < 10:  # Likely a decimal percentage
         retention_value = retention_value * 100
     
+    # Ensure communication_template is meaningful
+    template = result.get("communication_template", "")
+    if not template or len(template) < 15:
+        voucher = result.get("voucher_code")
+        if voucher:
+            template = (
+                f"Subject: Update on your delivery | "
+                f"We're proactively reaching out about a potential delay. "
+                f"As a gesture of goodwill, here's your {voucher} code for {discount_value:.0f}% off."
+            )
+        else:
+            template = "Subject: Your delivery is on track | We're monitoring your shipment and will notify you of any changes."
+    
+    # Ensure timing is meaningful
+    timing = result.get("timing", "")
+    if not timing or len(timing) < 5:
+        if delay_days > 3:
+            timing = "Day 1: Proactive notification with voucher"
+        elif delay_days > 0:
+            timing = "Day 1: Proactive notification, Day 3: Follow-up if delayed"
+        else:
+            timing = "Monitor only — no proactive outreach needed"
+    
     return {
         "voucher_code": result.get("voucher_code"),
         "discount_percentage": discount_value,
-        "communication_template": result.get("communication_template", "Standard delay notification"),
-        "timing": result.get("timing", "Day 1: Initial notification"),
+        "communication_template": template,
+        "timing": timing,
         "retention_probability": retention_value
     }
 
@@ -461,12 +569,18 @@ def run_orchestrator(
     carrier: Dict,
     recovery: Dict
 ) -> Dict:
-    """Agent 4: Decision Integration"""
+    """Agent 4: Decision Integration. Raises LLMError on failure."""
     user_prompt = f"""Integrate all agent recommendations:
 
 Risk: {risk['risk_level']} ({risk['risk_score']}/100)
-Carrier: {carrier['recommended_carrier']} (Upgrade: {carrier['should_upgrade']})
+- Factors: {', '.join(risk.get('primary_risk_factors', [])[:3])}
+Carrier: {carrier['recommended_carrier']} (Upgrade: {carrier['should_upgrade']}, Cost: R${carrier['cost_impact']})
 Recovery: {recovery.get('voucher_code', 'None')} ({recovery['discount_percentage']}% discount)
+- Retention probability: {recovery['retention_probability']}%
+
+Scenario context:
+- Distance: {scenario.distance_km}km, Weight: {scenario.weight_g}g
+- Predicted: {scenario.predicted_days} days vs Promised: {scenario.promised_days} days
 
 Create executive summary and provide:
 1. Cohesive action plan
@@ -484,27 +598,23 @@ Return JSON format."""
     risk_level = risk.get('risk_level', 'MODERATE')
     
     # Adjust confidence based on risk level (inverse relationship)
-    # Lower risk = higher confidence in decision
     if risk_level == 'CRITICAL':
-        min_confidence = 70.0  # We know what to do: aggressive action
+        min_confidence = 70.0
     elif risk_level == 'HIGH':
-        min_confidence = 75.0  # Clear mitigation path
+        min_confidence = 75.0
     elif risk_level == 'MODERATE':
-        min_confidence = 78.0  # Standard procedures apply
+        min_confidence = 78.0
     elif risk_level == 'LOW':
-        min_confidence = 85.0  # Simple, straightforward case
+        min_confidence = 85.0
     else:  # MINIMAL
-        min_confidence = 90.0  # Very confident in minimal action
+        min_confidence = 90.0
     
-    # If LLM returned too low confidence, adjust to minimum
     if confidence < min_confidence:
         confidence = min_confidence
     
-    # If too similar to risk score, add variation
     if abs(confidence - risk_score) < 5:
         confidence = min(confidence + 12, 95)
     
-    # Ensure confidence is in valid range (70-95%)
     confidence = max(70.0, min(confidence, 95.0))
     
     estimated_time = coerce_to_float(
@@ -512,11 +622,21 @@ Return JSON format."""
         scenario.predicted_days
     )
     
+    # Ensure executive_summary is meaningful
+    summary = result.get("executive_summary", "")
+    if not summary or len(summary) < 20:
+        delay = scenario.predicted_days - scenario.promised_days
+        summary = (
+            f"Risk level {risk_level} ({risk_score}/100). "
+            f"{'Carrier upgrade to ' + carrier['recommended_carrier'] + ' recommended. ' if carrier['should_upgrade'] else 'Standard carrier sufficient. '}"
+            f"{'Recovery voucher ' + str(recovery.get('voucher_code', '')) + ' activated. ' if recovery.get('voucher_code') else ''}"
+            f"Estimated delivery: {estimated_time:.1f} days "
+            f"({'on time' if delay <= 0 else f'{delay:.1f} days over promise'}). "
+            f"Confidence: {confidence:.0f}%."
+        )
+    
     return {
-        "executive_summary": result.get(
-            "executive_summary",
-            "Integrated decision plan created"
-        ),
+        "executive_summary": summary,
         "estimated_delivery_time": estimated_time,
         "confidence_score": confidence
     }

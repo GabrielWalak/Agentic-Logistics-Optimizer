@@ -7,6 +7,7 @@ env/
 .env
 .env.local
 .env.*.local
+.env.production
 .env.production.local
 
 # Python
@@ -14,8 +15,17 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.so
+
+# ML model artifacts
 *.pkl
 *.joblib
+*.h5
+*.onnx
+
+# Local dev scripts
+_run_local.py
+_test_*.py
+_tmp_*.py
 
 # IDE
 .idea/
@@ -30,3 +40,10 @@ Thumbs.db
 # Docker
 .docker
 docker-compose.override.yml
+
+# Database (local)
+*.db
+local_test.db
+
+# ChromaDB local data
+chroma_db/
