@@ -30,6 +30,7 @@ COPY entrypoint.sh .
 COPY alembic.ini .
 COPY alembic/ ./alembic/
 COPY logistics_docs/ ./logistics_docs/
+COPY templates/ ./templates/
 COPY xgboost_model.pkl .
 
 # Make entrypoint executable

@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main, feature/*]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest httpx
+      
+      - name: Run tests
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_MODELS_TOKEN }}
+          API_KEY: test-api-key-for-ci
+          ENVIRONMENT: testing
+        run: |
+          pytest tests/ -v --tb=short
+      
+      - name: Lint check
+        run: |
+          pip install flake8
+          flake8 main.py pydantic_agents.py ml_predictor.py --max-line-length=120 --ignore=E501,W503,E402
