@@ -49,6 +49,7 @@ except ImportError:
             return func
         return decorator
 
+
 # ===== DATA MODELS =====
 
 class DeliveryScenario(BaseModel):
