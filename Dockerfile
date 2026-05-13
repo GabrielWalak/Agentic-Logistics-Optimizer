@@ -19,6 +19,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application files
 COPY pydantic_agents.py .
+COPY prompt_engineering.py .
 COPY models.py .
 COPY database.py .
 COPY main.py .
