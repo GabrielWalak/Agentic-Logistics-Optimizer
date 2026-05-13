@@ -10,7 +10,6 @@ import uuid
 import time
 import logging
 import asyncio
-import secrets
 import base64
 from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
@@ -19,7 +18,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request, Depends, Security
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse
 from fastapi.security import APIKeyHeader
 from fastapi.openapi.utils import get_openapi
 from pydantic import BaseModel, Field, ConfigDict
@@ -275,7 +274,7 @@ async def lifespan(app: FastAPI):
             freight_value=45.0,
             rag_context="Standard carrier rules apply",
         )
-        demo_decision = await asyncio.to_thread(run_multi_agent_analysis_parallel, demo_scenario)
+        await asyncio.to_thread(run_multi_agent_analysis_parallel, demo_scenario)
 
         DEMO_ANALYSIS_PAYLOAD = {
             "risk_assessment": {
@@ -424,7 +423,6 @@ async def analyze_delivery(
     try:
         # Auto-predict delivery days if not provided or use ML model
         predicted_days = request_body.predicted_days
-        ml_used = False
         if predicted_days is None or predicted_days <= 0:
             ml_prediction = predict_delivery_days(
                 distance_km=request_body.distance_km,
@@ -435,7 +433,6 @@ async def analyze_delivery(
             )
             if ml_prediction is not None:
                 predicted_days = ml_prediction
-                ml_used = True
             else:
                 predicted_days = 7.0  # Safe default
 
@@ -638,7 +635,7 @@ def _get_rag_context(
             },
         )
         return context if context else "Standard carrier rules apply"
-    except Exception as e:
+    except Exception:
         # Fallback if ChromaDB not available
         return "Standard carrier rules apply"
 

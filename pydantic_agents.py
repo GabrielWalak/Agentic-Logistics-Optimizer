@@ -245,7 +245,7 @@ class RAGCache:
             return None
         try:
             return self.redis.get(key)
-        except:
+        except Exception:
             return None
     
     def set(self, key: str, value: str, ttl: int = 3600):
@@ -254,7 +254,7 @@ class RAGCache:
             return
         try:
             self.redis.setex(key, ttl, value)
-        except:
+        except Exception:
             pass
     
     @staticmethod
@@ -308,7 +308,7 @@ def coerce_to_string(value, default: str) -> str:
         if isinstance(value, list):
             return ', '.join(str(v) for v in value)
         return str(value)
-    except:
+    except (ValueError, TypeError):
         return default
 
 

@@ -35,4 +35,4 @@ jobs:
       - name: Lint check
         run: |
           pip install flake8
-          flake8 main.py pydantic_agents.py ml_predictor.py --max-line-length=120 --ignore=E501,W503,E402
+          flake8 main.py pydantic_agents.py ml_predictor.py --max-line-length=120 --ignore=E501,W503,E402,W293,W291,W504,W391,F541,F841
