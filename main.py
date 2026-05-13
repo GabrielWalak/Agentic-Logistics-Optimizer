@@ -644,6 +644,7 @@ def build_home_page(base_url: str, demo: Dict[str, Any]) -> str:
 
             const d = data.decision;
             const g = data.grading;
+            const ml = data.ml_prediction;
             const riskColor = d.risk_assessment.risk_level === 'HIGH' || d.risk_assessment.risk_level === 'CRITICAL' ? '#f85149' : d.risk_assessment.risk_level === 'MODERATE' ? '#d29922' : '#3fb950';
 
             resultDiv.innerHTML = `
@@ -651,6 +652,10 @@ def build_home_page(base_url: str, demo: Dict[str, Any]) -> str:
                     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
                         <span style="color: ${{riskColor}}; font-weight: 700; font-size: 1.1em;">${{d.risk_assessment.risk_level}} RISK (${{d.risk_assessment.risk_score}}/100)</span>
                         <span style="color: #3fb950; font-size: 0.9em;">Grading: ${{g.overall_score}}/100 (${{g.quality_level}})</span>
+                    </div>
+                    <div class="demo-row" style="background: #1c2128; padding: 8px; border-radius: 4px; margin-bottom: 8px;">
+                        <span class="demo-label" style="color: #58a6ff;">ML Prediction (XGBoost)</span>
+                        <span class="demo-value" style="color: #58a6ff;">${{ml.predicted_days}} days ${{ml.ml_model_used ? '✓ model used' : '(fallback)'}}</span>
                     </div>
                     <div class="demo-row"><span class="demo-label">Risk Factors</span><span class="demo-value">${{d.risk_assessment.primary_risk_factors.join(', ')}}</span></div>
                     <div class="demo-row"><span class="demo-label">Analysis</span><span class="demo-value" style="font-size:0.83em; max-width:650px;">${{d.risk_assessment.analysis}}</span></div>
@@ -1128,22 +1133,20 @@ async def predict_delivery(request_body: PredictRequest) -> Dict[str, Any]:
 
 # ===== DEMO ENDPOINT (public, rate-limited, predefined scenarios only) =====
 
-DEMO_SCENARIOS = {
-    "high": DeliveryScenario(
-        predicted_days=12.5, promised_days=7.0, distance_km=2800,
-        weight_g=4500, freight_value=150, payment_lag_days=5, is_weekend_order=1,
-        rag_context="Distance Guidelines: Deliveries over 2000km require premium carriers. Weekend orders add 2-3 days delay.",
-    ),
-    "moderate": DeliveryScenario(
-        predicted_days=6.5, promised_days=6.0, distance_km=650,
-        weight_g=2000, freight_value=55, payment_lag_days=3, is_weekend_order=0,
-        rag_context="Regional delivery 100-500km: 3-7 days average. Weight 2kg adds +1-2 days. Payment lag 3 days: moderate risk.",
-    ),
-    "low": DeliveryScenario(
-        predicted_days=2.0, promised_days=3.0, distance_km=45,
-        weight_g=300, freight_value=15, payment_lag_days=0, is_weekend_order=0,
-        rag_context="Local delivery under 100km: 1-3 days. Lightweight package under 500g. Minimal risk scenario.",
-    ),
+# Demo scenario parameters (without predicted_days — ML model will calculate it)
+DEMO_SCENARIO_PARAMS = {
+    "high": {
+        "promised_days": 7.0, "distance_km": 2800, "weight_g": 4500,
+        "freight_value": 150, "payment_lag_days": 5, "is_weekend_order": 1,
+    },
+    "moderate": {
+        "promised_days": 6.0, "distance_km": 650, "weight_g": 2000,
+        "freight_value": 55, "payment_lag_days": 3, "is_weekend_order": 0,
+    },
+    "low": {
+        "promised_days": 3.0, "distance_km": 45, "weight_g": 300,
+        "freight_value": 15, "payment_lag_days": 0, "is_weekend_order": 0,
+    },
 }
 
 
@@ -1156,23 +1159,58 @@ class DemoRequest(BaseModel):
 async def demo_analyze(request_body: DemoRequest) -> Dict[str, Any]:
     """Public demo endpoint — runs predefined scenarios without API key.
     
+    Uses ML model (XGBoost) to predict delivery time, then feeds into multi-agent LLM system.
     Only accepts: high, moderate, low. No custom payloads allowed.
     """
     scenario_name = request_body.scenario.lower().strip()
-    if scenario_name not in DEMO_SCENARIOS:
+    if scenario_name not in DEMO_SCENARIO_PARAMS:
         raise HTTPException(
             status_code=400,
             detail=f"Invalid scenario. Choose: high, moderate, or low.",
         )
 
     start_time = time.perf_counter()
-    scenario = DEMO_SCENARIOS[scenario_name]
+    params = DEMO_SCENARIO_PARAMS[scenario_name]
+
+    # Step 1: ML Model predicts delivery time
+    ml_prediction = predict_delivery_days(
+        distance_km=params["distance_km"],
+        weight_g=params["weight_g"],
+        freight_value=params["freight_value"],
+        payment_lag_days=params["payment_lag_days"],
+        is_weekend_order=params["is_weekend_order"],
+    )
+    ml_used = ml_prediction is not None
+    predicted_days = ml_prediction if ml_used else params["promised_days"] + 2.0
+
+    # Step 2: RAG retrieval for context
+    rag_context = _get_rag_context(
+        distance_km=params["distance_km"],
+        weight_g=params["weight_g"],
+        payment_lag_days=params["payment_lag_days"],
+        is_weekend_order=params["is_weekend_order"],
+        predicted_days=predicted_days,
+        promised_days=params["promised_days"],
+    )
+
+    # Step 3: Build scenario with ML-predicted days + RAG context
+    scenario = DeliveryScenario(
+        predicted_days=predicted_days,
+        promised_days=params["promised_days"],
+        distance_km=params["distance_km"],
+        weight_g=params["weight_g"],
+        payment_lag_days=params["payment_lag_days"],
+        is_weekend_order=params["is_weekend_order"],
+        freight_value=params["freight_value"],
+        rag_context=rag_context,
+    )
 
     try:
+        # Step 4: Multi-Agent LLM analysis
         decision = await asyncio.to_thread(run_multi_agent_analysis_parallel, scenario)
         processing_time_ms = (time.perf_counter() - start_time) * 1000
 
-        # Grade responses
+        # Step 5: Grade responses
         grader = ResponseGrader()
         risk_score, risk_details = grader.grade_risk_assessment(json.dumps(decision.risk_assessment.model_dump()))
         carrier_score, carrier_details = grader.grade_carrier_recommendation(json.dumps(decision.carrier_recommendation.model_dump()))
@@ -1184,6 +1222,11 @@ async def demo_analyze(request_body: DemoRequest) -> Dict[str, Any]:
         return {
             "request_id": str(uuid.uuid4()),
             "scenario": scenario_name,
+            "ml_prediction": {
+                "predicted_days": predicted_days,
+                "ml_model_used": ml_used,
+                "model_type": "XGBoost Regressor (Olist dataset)",
+            },
             "decision": decision.model_dump(),
             "grading": {
                 "overall_score": overall_score,
