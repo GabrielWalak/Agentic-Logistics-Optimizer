@@ -369,7 +369,8 @@ async def root(request: Request) -> HTMLResponse:
 
     host = request.url.hostname or "localhost"
     port = request.url.port
-    scheme = request.url.scheme or "http"
+    # Trust X-Forwarded-Proto from nginx reverse proxy
+    scheme = request.headers.get("x-forwarded-proto", request.url.scheme) or "http"
     if port and port not in (80, 443):
         base_url = f"{scheme}://{host}:{port}"
     else:
