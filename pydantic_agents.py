@@ -228,7 +228,7 @@ class RAGCache:
         if REDIS_AVAILABLE:
             try:
                 self.redis = redis.Redis(
-                    host='localhost',
+                    host=os.getenv('REDIS_HOST', 'localhost'),
                     port=6379,
                     decode_responses=True,
                     socket_connect_timeout=2

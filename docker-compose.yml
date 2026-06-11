@@ -51,6 +51,7 @@ services:
       
       # Redis
       REDIS_URL: redis://redis:6379/0
+      REDIS_HOST: redis
       
       # API Keys
       GITHUB_TOKEN: ${GITHUB_TOKEN}
