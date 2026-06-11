@@ -682,15 +682,18 @@ async def predict_delivery(request_body: PredictRequest) -> Dict[str, Any]:
 DEMO_SCENARIO_PARAMS = {
     "high": {
         "promised_days": 7.0, "distance_km": 2800, "weight_g": 4500,
-        "freight_value": 150, "payment_lag_days": 5, "is_weekend_order": 1,
+        "freight_value": 65, "payment_lag_days": 5, "is_weekend_order": 1,
+        "purchase_month": 11,
     },
     "moderate": {
         "promised_days": 6.0, "distance_km": 650, "weight_g": 2000,
-        "freight_value": 55, "payment_lag_days": 3, "is_weekend_order": 0,
+        "freight_value": 40, "payment_lag_days": 3, "is_weekend_order": 0,
+        "purchase_month": 9,
     },
     "low": {
         "promised_days": 3.0, "distance_km": 45, "weight_g": 300,
         "freight_value": 15, "payment_lag_days": 0, "is_weekend_order": 0,
+        "purchase_month": 10,
     },
 }
 
@@ -724,6 +727,7 @@ async def demo_analyze(request_body: DemoRequest) -> Dict[str, Any]:
         freight_value=params["freight_value"],
         payment_lag_days=params["payment_lag_days"],
         is_weekend_order=params["is_weekend_order"],
+        purchase_month=params.get("purchase_month", 6),
     )
     ml_used = ml_prediction is not None
     predicted_days = ml_prediction if ml_used else params["promised_days"] + 2.0

@@ -8,6 +8,10 @@ env/
 .env.local
 .env.*.local
 .env.production
+
+# Local practice/dev folders
+interview_task/
+project2/
 .env.production.local
 
 # Python

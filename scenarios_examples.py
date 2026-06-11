@@ -18,7 +18,7 @@ SCENARIO_1_HIGH_RISK = DeliveryScenario(
     weight_g=4500,
     payment_lag_days=5,
     is_weekend_order=1,
-    freight_value=150.00,
+    freight_value=65.00,
     rag_context="""
     Distance Guidelines: Deliveries over 2000km require premium carriers.
     Weight Rules: Packages 4-5kg need reinforced packaging and insurance.
