@@ -2,7 +2,10 @@
 
 Enterprise-grade multi-agent AI system for real-time logistics decision-making. Four specialized LLM agents work in parallel to analyze delivery scenarios, optimize carrier selection, design customer recovery strategies, and produce integrated decisions with confidence scoring.
 
-**Live Demo:** [http://46.101.179.137:8000](http://46.101.179.137:8000) (password-protected)
+## Live Demo
+
+**[https://gwprojects.tech](https://gwprojects.tech)** — deployed on DigitalOcean with HTTPS (Let's Encrypt)
+
 
 ---
 
