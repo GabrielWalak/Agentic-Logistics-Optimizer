@@ -4,7 +4,7 @@ Enterprise-grade multi-agent AI system for real-time logistics decision-making. 
 
 ## Live Demo
 
-**[https://gwprojects.tech](https://gwprojects.tech)** — deployed on DigitalOcean with HTTPS (Let's Encrypt)
+**[https://gwprojects.tech](https://gwprojects.switzerlandnorth.cloudapp.azure.com/)** — deployed on Azure with HTTPS (Let's Encrypt)
 
 
 ---
@@ -48,7 +48,7 @@ Delivery Scenario Input (distance, weight, time, payment)
 | **Knowledge Base** | RAG + ChromaDB Vector Store |
 | **Database** | PostgreSQL + SQLModel (async) |
 | **Cache** | Redis (response caching) |
-| **Infrastructure** | Docker + DigitalOcean |
+| **Infrastructure** | Docker + Azure |
 | **Observability** | LangSmith + Structured JSON Logging |
 | **Evaluation** | Behavioral Grading Framework |
 | **Security** | API Key Auth + Basic Auth (portfolio) |
