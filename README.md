@@ -4,7 +4,7 @@ Enterprise-grade multi-agent AI system for real-time logistics decision-making. 
 
 ## Live Demo
 
-**[https://gwprojects.tech](https://gwprojects.switzerlandnorth.cloudapp.azure.com/)** — deployed on Azure with HTTPS (Let's Encrypt)
+**[https://gwprojects.switzerlandnorth.cloudapp.azure.com/](https://gwprojects.switzerlandnorth.cloudapp.azure.com/)** — deployed on Azure with HTTPS (Let's Encrypt)
 
 
 ---
