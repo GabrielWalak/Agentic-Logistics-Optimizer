@@ -284,6 +284,7 @@ class TestDemoEndpoint:
         assert "decision" in data
         assert "grading" in data
         assert data["fallback_used"] is False
+        assert "cache_enabled" in data
 
     @patch("main._get_rag_context", return_value="Test logistics context")
     @patch("pydantic_agents.call_ollama")
@@ -301,6 +302,7 @@ class TestDemoEndpoint:
         data = response.json()
         carrier = data["decision"]["carrier_recommendation"]
         assert data["fallback_used"] is True
+        assert "cache_enabled" in data
         assert data["fallback_reason"] == (
             "LLM provider temporarily unavailable"
         )

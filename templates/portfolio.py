@@ -155,8 +155,8 @@ def build_home_page(base_url: str, llm_model: str) -> str:
             <p style="color: #8b949e; margin-bottom: 12px; font-size: 0.9em;">Updated from the latest live API response</p>
             <div class="grid">
                 <div class="card"><div class="card-title">Processing Time</div><div id="metric-processing" class="card-value">—</div><div class="card-sub">Includes ML, RAG and agent orchestration</div></div>
-                <div class="card"><div class="card-title">Grading Score</div><div id="metric-grading" class="card-value" style="color: #3fb950;">—</div><div class="card-sub">Deterministic grading across 3 specialist outputs</div></div>
-                <div class="card"><div class="card-title">Decision Confidence</div><div id="metric-confidence" class="card-value">—</div><div class="card-sub">Bounded evidence-quality estimate</div></div>
+                <div class="card"><div class="card-title">Specialist Scores</div><div id="metric-specialists" class="card-value" style="font-size: 1.15em;">—</div><div class="card-sub">Risk · Carrier · Recovery</div></div>
+                <div class="card"><div class="card-title">Combined Quality Score</div><div id="metric-grading" class="card-value" style="color: #3fb950;">—</div><div id="metric-grading-formula" class="card-sub">Arithmetic mean of the 3 specialist scores</div></div>
             </div>
         </div>
 
@@ -216,11 +216,16 @@ def build_home_page(base_url: str, llm_model: str) -> str:
             const data = await resp.json();
             const elapsedSeconds = (data.processing_time_ms / 1000).toFixed(1);
             const fallbackLabel = data.fallback_used ? ' · deterministic fallback' : '';
-            statusText.textContent = `Completed in ${{elapsedSeconds}}s${{fallbackLabel}}`;
+            const cacheLabel = data.cache_enabled ? ' · Redis cache active' : ' · Redis cache unavailable';
+            statusText.textContent = `Completed in ${{elapsedSeconds}}s${{fallbackLabel}}${{cacheLabel}}`;
             const d = data.decision, g = data.grading, ml = data.ml_prediction;
+            const riskGrade = Number(g.risk_grading.score);
+            const carrierGrade = Number(g.carrier_grading.score);
+            const recoveryGrade = Number(g.recovery_grading.score);
             document.getElementById('metric-processing').textContent = `${{elapsedSeconds}}s`;
+            document.getElementById('metric-specialists').textContent = `${{riskGrade}} · ${{carrierGrade}} · ${{recoveryGrade}}`;
             document.getElementById('metric-grading').textContent = `${{g.overall_score}}/100`;
-            document.getElementById('metric-confidence').textContent = `${{d.confidence_score}}/100`;
+            document.getElementById('metric-grading-formula').textContent = `(${{riskGrade}} + ${{carrierGrade}} + ${{recoveryGrade}}) ÷ 3`;
             const riskColor = d.risk_assessment.risk_level === 'HIGH' || d.risk_assessment.risk_level === 'CRITICAL' ? '#f85149' : d.risk_assessment.risk_level === 'MODERATE' ? '#d29922' : '#3fb950';
             const view = {{
                 riskLevel: escapeHtml(d.risk_assessment.risk_level),
