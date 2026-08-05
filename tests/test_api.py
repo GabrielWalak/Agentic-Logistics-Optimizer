@@ -36,6 +36,7 @@ sys.modules["database"] = mock_database
 from main import app, API_KEY as CONFIGURED_API_KEY  # noqa: E402
 from pydantic_agents import (  # noqa: E402
     CARRIER_AGENT_PROMPT,
+    LLMError,
     ORCHESTRATOR_PROMPT,
     RECOVERY_AGENT_PROMPT,
     RISK_AGENT_PROMPT,
@@ -157,7 +158,7 @@ class TestAnalyzeEndpoint:
         decision = data["decision"]
         assert decision["risk_assessment"]["risk_level"] == "HIGH"
         assert decision["carrier_recommendation"]["should_upgrade"] is True
-        assert decision["recovery_plan"]["voucher_code"] == "DELAY25"
+        assert decision["recovery_plan"]["voucher_code"] == "DELAY50"
 
         # Check grading
         grading = data["grading"]
@@ -202,6 +203,30 @@ class TestAnalyzeEndpoint:
         )
 
         assert response.status_code == 504
+
+    @patch("main._prepare_analysis_scenario")
+    @patch("main._run_analysis_with_timeout", new_callable=AsyncMock)
+    def test_analyze_reports_llm_failure_without_fallback(
+        self,
+        mock_run_analysis,
+        mock_prepare_scenario,
+    ):
+        """Authenticated API calls must expose provider unavailability."""
+        mock_prepare_scenario.return_value = MagicMock()
+        mock_run_analysis.side_effect = LLMError("Daily quota exhausted")
+
+        response = client.post(
+            "/analyze",
+            json={
+                "distance_km": 400,
+                "weight_g": 1000,
+                "freight_value": 30,
+            },
+            headers={"x-api-key": API_KEY},
+        )
+
+        assert response.status_code == 503
+        assert "Daily quota exhausted" in response.json()["detail"]
 
 
 class TestBatchAnalyzeEndpoint:
@@ -254,6 +279,30 @@ class TestDemoEndpoint:
         assert data["scenario"] == "high"
         assert "decision" in data
         assert "grading" in data
+        assert data["fallback_used"] is False
+
+    @patch("main._get_rag_context", return_value="Test logistics context")
+    @patch("pydantic_agents.call_ollama")
+    def test_demo_uses_typed_fallback_when_llm_is_unavailable(
+        self,
+        mock_llm,
+        mock_rag,
+    ):
+        """The public demo remains usable and labels deterministic output."""
+        mock_llm.side_effect = LLMError("Daily quota exhausted")
+
+        response = client.post("/demo/analyze", json={"scenario": "high"})
+
+        assert response.status_code == 200
+        data = response.json()
+        carrier = data["decision"]["carrier_recommendation"]
+        assert data["fallback_used"] is True
+        assert data["fallback_reason"] == (
+            "LLM provider temporarily unavailable"
+        )
+        assert carrier["quote_source"] == "portfolio_rate_card_v1"
+        assert carrier["estimated_cost"] > 0
+        assert data["decision"]["confidence_score"] == 65.0
 
     def test_demo_rejects_invalid_scenario(self):
         """Should reject unknown scenario names."""

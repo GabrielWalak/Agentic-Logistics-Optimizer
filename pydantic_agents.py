@@ -134,6 +134,149 @@ class OrchestratorOutput(BaseModel):
     confidence_score: float
 
 
+def _select_recovery_policy(
+    delay_days: float,
+) -> tuple[Optional[str], float]:
+    """Return the voucher defined by the deterministic recovery policy."""
+    if delay_days <= 0:
+        return None, 0.0
+    if delay_days <= 1:
+        return "DELAY15", 15.0
+    if delay_days <= 3:
+        return "DELAY25", 25.0
+    if delay_days <= 7:
+        return "DELAY50", 50.0
+    return "EXPRESS_FREE", 0.0
+
+
+def build_deterministic_fallback_decision(
+    scenario: DeliveryScenario,
+) -> IntegratedDecision:
+    """Build a transparent demo fallback from versioned business rules.
+
+    The fallback is intentionally deterministic and contains no generated
+    operational facts. It keeps the public portfolio usable during provider
+    quota exhaustion while authenticated API calls continue to fail loudly.
+    """
+    risk_score = 0.0
+    risk_factors: List[str] = []
+    delay_days = scenario.predicted_days - scenario.promised_days
+
+    if scenario.distance_km > 1500:
+        risk_score += 20
+        risk_factors.append(f"Long distance ({scenario.distance_km:.0f} km)")
+    if scenario.weight_g > 3000:
+        risk_score += 15
+        risk_factors.append(f"Heavy package ({scenario.weight_g:.0f} g)")
+    if delay_days > 3:
+        risk_score += 25
+        risk_factors.append(f"Predicted delay ({delay_days:.1f} days)")
+    if scenario.payment_lag_days > 5:
+        risk_score += 10
+        risk_factors.append(
+            f"Payment lag ({scenario.payment_lag_days} days)"
+        )
+    if scenario.is_weekend_order:
+        risk_score += 5
+        risk_factors.append("Weekend order")
+    if not risk_factors:
+        risk_factors.append("Standard delivery conditions")
+
+    if risk_score <= 20:
+        risk_level = "MINIMAL"
+    elif risk_score <= 40:
+        risk_level = "LOW"
+    elif risk_score <= 60:
+        risk_level = "MODERATE"
+    elif risk_score <= 80:
+        risk_level = "HIGH"
+    else:
+        risk_level = "CRITICAL"
+
+    priority_by_level = {
+        "MINIMAL": "LOW",
+        "LOW": "MEDIUM",
+        "MODERATE": "MEDIUM",
+        "HIGH": "HIGH",
+        "CRITICAL": "URGENT",
+    }
+    risk = RiskAssessment(
+        risk_level=risk_level,
+        risk_score=risk_score,
+        primary_risk_factors=risk_factors,
+        mitigation_priority=priority_by_level[risk_level],
+        analysis=(
+            f"Deterministic fallback score {risk_score:.0f}/100 calculated "
+            "from the documented distance, weight, delay, payment, and "
+            "weekend rules. Live LLM reasoning was unavailable."
+        ),
+    )
+
+    quotes = get_all_carrier_quotes(
+        distance_km=scenario.distance_km,
+        weight_g=scenario.weight_g,
+    )
+    should_upgrade = risk_level in {"HIGH", "CRITICAL"} or delay_days > 0
+    selected_quote = select_carrier_quote(
+        quotes=quotes,
+        requested_carrier=(
+            "Premium Express" if should_upgrade else "Standard Shipping"
+        ),
+        should_upgrade=should_upgrade,
+    )
+    standard_quote = next(
+        quote for quote in quotes if quote.carrier == "Standard Shipping"
+    )
+    cost_impact = round(
+        max(0.0, selected_quote.estimated_cost - standard_quote.estimated_cost),
+        2,
+    )
+    carrier = CarrierRecommendation(
+        recommended_carrier=selected_quote.carrier,
+        current_carrier="Standard Shipping",
+        should_upgrade=(
+            should_upgrade or selected_quote.carrier != "Standard Shipping"
+        ),
+        upgrade_rationale=(
+            "Selected deterministically from available typed carrier quotes "
+            "using the documented risk and delivery-window rules."
+        ),
+        cost_impact=cost_impact,
+        roi_analysis=(
+            f"Verified incremental quote cost is R${cost_impact:.2f}; financial "
+            "return is not estimated without validated churn-cost data."
+        ),
+        estimated_cost=selected_quote.estimated_cost,
+        estimated_transit_days=selected_quote.estimated_transit_days,
+        quote_source=selected_quote.source,
+    )
+
+    voucher_code, discount = _select_recovery_policy(delay_days)
+
+    recovery = CustomerRecoveryPlan(
+        voucher_code=voucher_code,
+        discount_percentage=discount,
+        communication_template=(
+            "Delivery status update generated from the documented recovery "
+            "policy; notify the customer proactively when a delay is predicted."
+        ),
+        timing="Day 1 when a delay is detected" if delay_days > 0 else "Monitor only",
+        retention_probability=max(50.0, 90.0 - max(delay_days, 0) * 4),
+    )
+
+    return IntegratedDecision(
+        risk_assessment=risk,
+        carrier_recommendation=carrier,
+        recovery_plan=recovery,
+        executive_summary=(
+            f"Deterministic fallback: {risk_level} risk; use "
+            f"{selected_quote.carrier} and apply the documented recovery policy."
+        ),
+        estimated_delivery_time=scenario.predicted_days,
+        confidence_score=65.0,
+    )
+
+
 # ===== PROVIDER-NEUTRAL LLM CLIENT =====
 
 def get_llm_config() -> Dict[str, str]:
@@ -295,7 +438,7 @@ def call_ollama(
             # Authentication, invalid requests, and retired endpoints will not
             # recover during this request. Retrying them only adds latency.
             permanent_error = getattr(e, "status_code", None) in {
-                400, 401, 403, 404, 410, 422
+                400, 401, 403, 404, 410, 422, 429
             }
             response_was_truncated = "length limit was reached" in str(e).lower()
             if permanent_error or response_was_truncated:
@@ -600,21 +743,21 @@ required JSON object."""
         2,
     )
     
-    # Ensure ROI analysis is meaningful
-    roi = result.get("roi_analysis", "")
-    if not roi or len(roi) < 10:
-        if should_upgrade:
-            roi = (
-                f"Verified upgrade cost impact is R${cost_impact_value:.2f}. "
-                f"The selected quote estimates {selected_quote.estimated_transit_days:.1f} "
-                f"transit days. Financial return cannot be fully quantified without "
-                f"validated penalty and churn-cost data."
-            )
-        else:
-            roi = (
-                "The lowest-cost available quote meets the current requirements; "
-                "no incremental carrier cost is required."
-            )
+    # Financial claims are never copied from model output. The model can choose
+    # and explain a carrier, but only verified inputs may appear as numbers.
+    if should_upgrade:
+        roi = (
+            f"Verified upgrade cost impact is R${cost_impact_value:.2f}. "
+            f"The selected quote estimates "
+            f"{selected_quote.estimated_transit_days:.1f} transit days. "
+            "Financial return cannot be fully quantified without validated "
+            "penalty and churn-cost data."
+        )
+    else:
+        roi = (
+            "The lowest-cost available quote meets the current requirements; "
+            "no incremental carrier cost is required."
+        )
     
     # Ensure upgrade_rationale is meaningful
     rationale = result.get("upgrade_rationale", "")
@@ -668,8 +811,9 @@ Provide recovery plan in JSON format. Return retention_probability as percentage
     )
     result = parse_json_response(response)
     
-    # Validate discount and retention as percentages
-    discount_value = coerce_to_float(result.get("discount_percentage"), 0.0)
+    # Voucher selection is a business rule, not a generative decision. Keeping
+    # it in Python prevents a fluent response from bypassing the policy table.
+    voucher_code, discount_value = _select_recovery_policy(delay_days)
     retention_value = coerce_to_float(result.get("retention_probability"), 85.0)
     
     # Ensure retention is in 0-100 range
@@ -680,31 +824,31 @@ Provide recovery plan in JSON format. Return retention_probability as percentage
     if retention_value < 10:  # Likely a decimal percentage
         retention_value = retention_value * 100
     
-    # Ensure communication_template is meaningful
-    template = result.get("communication_template", "")
-    if not template or len(template) < 15:
-        voucher = result.get("voucher_code")
-        if voucher:
-            template = (
-                f"Subject: Update on your delivery | "
-                f"We're proactively reaching out about a potential delay. "
-                f"As a gesture of goodwill, here's your {voucher} code for {discount_value:.0f}% off."
-            )
-        else:
-            template = "Subject: Your delivery is on track | We're monitoring your shipment and will notify you of any changes."
+    if voucher_code:
+        benefit = (
+            "free express delivery"
+            if voucher_code == "EXPRESS_FREE"
+            else f"{discount_value:.0f}% off"
+        )
+        template = (
+            "Subject: Update on your delivery | We're proactively reaching "
+            f"out about the predicted delay. Your {voucher_code} benefit "
+            f"provides {benefit}."
+        )
+    else:
+        template = (
+            "Subject: Your delivery is on track | We're monitoring your "
+            "shipment and will notify you if the forecast changes."
+        )
     
-    # Ensure timing is meaningful
-    timing = result.get("timing", "")
-    if not timing or len(timing) < 5:
-        if delay_days > 3:
-            timing = "Day 1: Proactive notification with voucher"
-        elif delay_days > 0:
-            timing = "Day 1: Proactive notification, Day 3: Follow-up if delayed"
-        else:
-            timing = "Monitor only — no proactive outreach needed"
-    
+    timing = (
+        "Day 1: Proactive notification with recovery benefit"
+        if voucher_code
+        else "Monitor only - no proactive recovery needed"
+    )
+
     return {
-        "voucher_code": result.get("voucher_code"),
+        "voucher_code": voucher_code,
         "discount_percentage": discount_value,
         "communication_template": template,
         "timing": timing,

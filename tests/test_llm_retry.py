@@ -122,15 +122,21 @@ class TestCallOllamaRetry:
 
     @patch("pydantic_agents.rag_cache")
     @patch("pydantic_agents._get_llm_client")
-    def test_does_not_retry_permanent_http_errors(self, mock_client_fn, mock_cache):
-        """Authentication and retired endpoints should fail without backoff."""
+    @pytest.mark.parametrize("status_code", [401, 429])
+    def test_does_not_retry_permanent_http_errors(
+        self,
+        mock_client_fn,
+        mock_cache,
+        status_code,
+    ):
+        """Authentication and quota failures should fail without backoff."""
         mock_cache.get.return_value = None
         mock_cache.make_key.return_value = "test_key"
-        error = Exception("Unauthorized")
-        error.status_code = 401
+        error = Exception("Permanent provider failure")
+        error.status_code = status_code
         mock_client_fn.return_value.chat.completions.create.side_effect = error
 
-        with pytest.raises(LLMError, match="Unauthorized"):
+        with pytest.raises(LLMError, match="Permanent provider failure"):
             call_ollama("system", "user", max_retries=3)
 
         assert mock_client_fn.return_value.chat.completions.create.call_count == 1

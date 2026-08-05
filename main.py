@@ -29,6 +29,7 @@ from pydantic_agents import (
     rag_cache,
     get_llm_config,
     _get_llm_client,
+    build_deterministic_fallback_decision,
 )
 from prompt_engineering import ResponseGrader
 from ml_predictor import predict_delivery_days, get_model_info
@@ -845,6 +846,8 @@ async def demo_analyze(request_body: DemoRequest) -> Dict[str, Any]:
             },
             "decision": decision.model_dump(),
             "grading": grading.model_dump(),
+            "fallback_used": False,
+            "fallback_reason": None,
             "processing_time_ms": round(processing_time_ms, 2),
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
@@ -855,7 +858,29 @@ async def demo_analyze(request_body: DemoRequest) -> Dict[str, Any]:
             detail="AI analysis exceeded the configured time limit",
         )
     except LLMError as e:
-        raise HTTPException(status_code=503, detail=f"AI model unavailable: {str(e)}")
+        decision = build_deterministic_fallback_decision(scenario)
+        grading = _grade_decision(decision)
+        processing_time_ms = (time.perf_counter() - start_time) * 1000
+        logger.warning(
+            "Demo used deterministic fallback",
+            scenario=scenario_name,
+            error=str(e),
+        )
+        return {
+            "request_id": str(uuid.uuid4()),
+            "scenario": scenario_name,
+            "ml_prediction": {
+                "predicted_days": predicted_days,
+                "ml_model_used": ml_used,
+                "model_type": "XGBoost Regressor (Olist dataset)",
+            },
+            "decision": decision.model_dump(),
+            "grading": grading.model_dump(),
+            "fallback_used": True,
+            "fallback_reason": "LLM provider temporarily unavailable",
+            "processing_time_ms": round(processing_time_ms, 2),
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Demo analysis failed: {str(e)}")
 
