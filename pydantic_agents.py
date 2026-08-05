@@ -149,6 +149,118 @@ def _select_recovery_policy(
     return "EXPRESS_FREE", 0.0
 
 
+def calculate_risk_score(scenario: DeliveryScenario) -> float:
+    """Calculate risk from the documented, auditable scoring rules."""
+    score = 0.0
+    if scenario.distance_km > 1500:
+        score += 20
+    if scenario.weight_g > 3000:
+        score += 15
+    if scenario.predicted_days - scenario.promised_days > 3:
+        score += 25
+    if scenario.payment_lag_days > 5:
+        score += 10
+    if scenario.is_weekend_order:
+        score += 5
+    return min(score, 100.0)
+
+
+def risk_level_from_score(score: float) -> str:
+    """Map a validated score to exactly one documented risk level."""
+    if score <= 20:
+        return "MINIMAL"
+    if score <= 40:
+        return "LOW"
+    if score <= 60:
+        return "MODERATE"
+    if score <= 80:
+        return "HIGH"
+    return "CRITICAL"
+
+
+def _risk_priority_from_level(risk_level: str) -> str:
+    """Keep mitigation priority consistent with the validated risk level."""
+    return {
+        "MINIMAL": "LOW",
+        "LOW": "MEDIUM",
+        "MODERATE": "MEDIUM",
+        "HIGH": "HIGH",
+        "CRITICAL": "URGENT",
+    }[risk_level]
+
+
+def _validated_risk_factors(scenario: DeliveryScenario) -> List[str]:
+    """Describe only the input conditions that contribute scoring points."""
+    factors = []
+    if scenario.distance_km > 1500:
+        factors.append(f"Long distance ({scenario.distance_km:.0f} km, +20)")
+    if scenario.weight_g > 3000:
+        factors.append(f"Heavy package ({scenario.weight_g:.0f} g, +15)")
+    delay_days = scenario.predicted_days - scenario.promised_days
+    if delay_days > 3:
+        factors.append(f"Predicted delay ({delay_days:.1f} days, +25)")
+    if scenario.payment_lag_days > 5:
+        factors.append(
+            f"Payment lag ({scenario.payment_lag_days} days, +10)"
+        )
+    if scenario.is_weekend_order:
+        factors.append("Weekend order (+5)")
+    return factors or ["No documented scoring rule triggered"]
+
+
+def _validated_risk_analysis(
+    scenario: DeliveryScenario,
+    risk_score: float,
+    risk_level: str,
+) -> str:
+    """Build an explanation containing only validated shipment facts."""
+    triggered_rules = []
+    if scenario.distance_km > 1500:
+        triggered_rules.append("distance over 1500 km (+20)")
+    if scenario.weight_g > 3000:
+        triggered_rules.append("weight over 3000 g (+15)")
+    if scenario.predicted_days - scenario.promised_days > 3:
+        triggered_rules.append("predicted delay over 3 days (+25)")
+    if scenario.payment_lag_days > 5:
+        triggered_rules.append("payment lag over 5 days (+10)")
+    if scenario.is_weekend_order:
+        triggered_rules.append("weekend order (+5)")
+
+    rules_text = ", ".join(triggered_rules) or "no scoring rule triggered"
+    return (
+        f"Validated application rules produce {risk_score:.0f}/100, mapped to "
+        f"{risk_level}. Triggered rules: {rules_text}. The ML model predicts "
+        f"{scenario.predicted_days:.1f} days against a "
+        f"{scenario.promised_days:.1f}-day promise. General knowledge-base "
+        "statistics do not override these shipment-specific values."
+    )
+
+
+def _analysis_has_unsupported_claims(
+    analysis: str,
+    risk_score: float,
+    risk_level: str,
+) -> bool:
+    """Detect common narrative contradictions before returning LLM text."""
+    stated_levels = re.findall(
+        r"\b(minimal|low|moderate|high|critical)\s+risk\b",
+        analysis.lower(),
+    )
+    if any(level.upper() != risk_level for level in stated_levels):
+        return True
+
+    stated_scores = re.findall(r"\b(\d+(?:\.\d+)?)\s*/\s*100\b", analysis)
+    if any(abs(float(score) - risk_score) > 0.01 for score in stated_scores):
+        return True
+
+    unsupported_statistic = re.search(
+        r"\b\d+(?:\.\d+)?\s*(?:%|[-–]\s*\d+(?:\.\d+)?\s*days?\b)",
+        analysis,
+        flags=re.IGNORECASE,
+    )
+    return unsupported_statistic is not None
+
+
 def build_deterministic_fallback_decision(
     scenario: DeliveryScenario,
 ) -> IntegratedDecision:
@@ -158,57 +270,20 @@ def build_deterministic_fallback_decision(
     operational facts. It keeps the public portfolio usable during provider
     quota exhaustion while authenticated API calls continue to fail loudly.
     """
-    risk_score = 0.0
-    risk_factors: List[str] = []
+    risk_score = calculate_risk_score(scenario)
     delay_days = scenario.predicted_days - scenario.promised_days
+    risk_factors = _validated_risk_factors(scenario)
 
-    if scenario.distance_km > 1500:
-        risk_score += 20
-        risk_factors.append(f"Long distance ({scenario.distance_km:.0f} km)")
-    if scenario.weight_g > 3000:
-        risk_score += 15
-        risk_factors.append(f"Heavy package ({scenario.weight_g:.0f} g)")
-    if delay_days > 3:
-        risk_score += 25
-        risk_factors.append(f"Predicted delay ({delay_days:.1f} days)")
-    if scenario.payment_lag_days > 5:
-        risk_score += 10
-        risk_factors.append(
-            f"Payment lag ({scenario.payment_lag_days} days)"
-        )
-    if scenario.is_weekend_order:
-        risk_score += 5
-        risk_factors.append("Weekend order")
-    if not risk_factors:
-        risk_factors.append("Standard delivery conditions")
-
-    if risk_score <= 20:
-        risk_level = "MINIMAL"
-    elif risk_score <= 40:
-        risk_level = "LOW"
-    elif risk_score <= 60:
-        risk_level = "MODERATE"
-    elif risk_score <= 80:
-        risk_level = "HIGH"
-    else:
-        risk_level = "CRITICAL"
-
-    priority_by_level = {
-        "MINIMAL": "LOW",
-        "LOW": "MEDIUM",
-        "MODERATE": "MEDIUM",
-        "HIGH": "HIGH",
-        "CRITICAL": "URGENT",
-    }
+    risk_level = risk_level_from_score(risk_score)
     risk = RiskAssessment(
         risk_level=risk_level,
         risk_score=risk_score,
         primary_risk_factors=risk_factors,
-        mitigation_priority=priority_by_level[risk_level],
-        analysis=(
-            f"Deterministic fallback score {risk_score:.0f}/100 calculated "
-            "from the documented distance, weight, delay, payment, and "
-            "weekend rules. Live LLM reasoning was unavailable."
+        mitigation_priority=_risk_priority_from_level(risk_level),
+        analysis=_validated_risk_analysis(
+            scenario,
+            risk_score,
+            risk_level,
         ),
     )
 
@@ -602,6 +677,8 @@ def coerce_to_string(value, default: str) -> str:
 @traceable(name="risk_assessment_agent")
 def run_risk_assessment(scenario: DeliveryScenario) -> Dict:
     """Agent 1: Risk Assessment. Raises LLMError on failure."""
+    risk_score_value = calculate_risk_score(scenario)
+    risk_level = risk_level_from_score(risk_score_value)
     user_prompt = f"""Analyze this delivery scenario:
 
 Predicted Delivery: {scenario.predicted_days} days
@@ -612,10 +689,15 @@ Payment Lag: {scenario.payment_lag_days} days
 Weekend Order: {'Yes' if scenario.is_weekend_order else 'No'}
 Freight Value: R${scenario.freight_value}
 
+Authoritative score calculated by application rules: {risk_score_value}/100
+Authoritative risk level: {risk_level}
+
 Knowledge Base Context:
 {scenario.rag_context[:1000]}
 
-Provide risk assessment in JSON format."""
+Explain the validated result. Do not state a different score or level. The ML
+prediction above is authoritative; retrieved general statistics must not
+replace or contradict it. Provide the risk assessment in JSON format."""
 
     response = call_ollama(
         RISK_AGENT_PROMPT,
@@ -624,45 +706,29 @@ Provide risk assessment in JSON format."""
     )
     result = parse_json_response(response)
     
-    # Validate and coerce types
-    risk_score_value = coerce_to_float(result.get("risk_score"), 50.0)
-    
-    # Ensure primary_risk_factors is a list
-    factors = result.get("primary_risk_factors", [])
-    if isinstance(factors, str):
-        factors = [f.strip() for f in factors.split(',')]
-    if not factors:
-        # LLM didn't provide factors — generate from scenario data
-        factors = []
-        if scenario.distance_km > 1500:
-            factors.append(f"Long distance ({scenario.distance_km}km)")
-        if scenario.weight_g > 3000:
-            factors.append(f"Heavy weight ({scenario.weight_g}g)")
-        if scenario.predicted_days - scenario.promised_days > 2:
-            factors.append(f"Delivery delay ({scenario.predicted_days - scenario.promised_days:.1f} days)")
-        if scenario.payment_lag_days > 3:
-            factors.append(f"Payment lag ({scenario.payment_lag_days} days)")
-        if scenario.is_weekend_order:
-            factors.append("Weekend order")
-        if not factors:
-            factors = ["Standard delivery conditions"]
+    factors = _validated_risk_factors(scenario)
     
     analysis = result.get("analysis", "")
-    if not analysis or analysis == "No analysis provided":
-        # Generate meaningful analysis from data
-        delay = scenario.predicted_days - scenario.promised_days
-        analysis = (
-            f"Delivery scenario analysis: {scenario.distance_km}km distance, "
-            f"{scenario.weight_g}g weight, {delay:.1f} days potential delay. "
-            f"Payment lag of {scenario.payment_lag_days} days. "
-            f"Risk score {risk_score_value}/100 based on combined factors."
+    if (
+        not analysis
+        or analysis == "No analysis provided"
+        or _analysis_has_unsupported_claims(
+            analysis,
+            risk_score_value,
+            risk_level,
+        )
+    ):
+        analysis = _validated_risk_analysis(
+            scenario,
+            risk_score_value,
+            risk_level,
         )
     
     return {
-        "risk_level": result.get("risk_level", "MODERATE"),
+        "risk_level": risk_level,
         "risk_score": risk_score_value,
         "primary_risk_factors": factors,
-        "mitigation_priority": coerce_to_string(result.get("mitigation_priority"), "MEDIUM"),
+        "mitigation_priority": _risk_priority_from_level(risk_level),
         "analysis": analysis
     }
 
@@ -870,7 +936,7 @@ Risk: {risk['risk_level']} ({risk['risk_score']}/100)
 - Factors: {', '.join(risk.get('primary_risk_factors', [])[:3])}
 Carrier: {carrier['recommended_carrier']} (Upgrade: {carrier['should_upgrade']}, Cost: R${carrier['cost_impact']})
 Recovery: {recovery.get('voucher_code', 'None')} ({recovery['discount_percentage']}% discount)
-- Retention probability: {recovery['retention_probability']}%
+- Estimated retention probability: {recovery['retention_probability']}%
 
 Scenario context:
 - Distance: {scenario.distance_km}km, Weight: {scenario.weight_g}g
@@ -895,25 +961,9 @@ Return JSON format."""
     risk_score = risk.get('risk_score', 50)
     risk_level = risk.get('risk_level', 'MODERATE')
     
-    # Adjust confidence based on risk level (inverse relationship)
-    if risk_level == 'CRITICAL':
-        min_confidence = 70.0
-    elif risk_level == 'HIGH':
-        min_confidence = 75.0
-    elif risk_level == 'MODERATE':
-        min_confidence = 78.0
-    elif risk_level == 'LOW':
-        min_confidence = 85.0
-    else:  # MINIMAL
-        min_confidence = 90.0
-    
-    if confidence < min_confidence:
-        confidence = min_confidence
-    
-    if abs(confidence - risk_score) < 5:
-        confidence = min(confidence + 12, 95)
-    
-    confidence = max(70.0, min(confidence, 95.0))
+    # Confidence describes evidence quality, not the inverse of operational
+    # risk. Keep the model estimate bounded without artificially raising it.
+    confidence = max(0.0, min(confidence, 90.0))
     
     estimated_time = coerce_to_float(
         result.get("estimated_delivery_time"),

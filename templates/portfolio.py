@@ -1,18 +1,11 @@
-"""
-Portfolio page HTML template.
-Separated from main.py for clean code structure.
-"""
-from typing import Dict, Any
+"""Portfolio page HTML template, separated from the API entry point."""
+
+from html import escape
 
 
-def build_home_page(base_url: str, demo: Dict[str, Any]) -> str:
+def build_home_page(base_url: str, llm_model: str) -> str:
     """Render portfolio-style home page showcasing AI/ML architecture."""
-    risk = demo.get("risk_assessment", {})
-    carrier = demo.get("carrier_recommendation", {})
-    recovery = demo.get("recovery_plan", {})
-
-    risk_factors = risk.get("primary_risk_factors", [])
-
+    llm_model_label = escape(llm_model)
     html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -76,7 +69,7 @@ def build_home_page(base_url: str, demo: Dict[str, Any]) -> str:
             <div class="badge-row">
                 <span class="badge">Python 3.11</span>
                 <span class="badge">FastAPI</span>
-                <span class="badge">Gemini Flash</span>
+                <span class="badge">{llm_model_label}</span>
                 <span class="badge">Multi-Agent</span>
                 <span class="badge">RAG</span>
                 <span class="badge">PostgreSQL</span>
@@ -109,49 +102,41 @@ def build_home_page(base_url: str, demo: Dict[str, Any]) -> str:
         <div class="section">
             <h2>Technology Stack</h2>
             <div class="tech-grid">
-                <div class="tech-item"><div class="tech-label">LLM / AI</div><div class="tech-value">Gemini Flash via OpenAI-compatible API</div></div>
+                <div class="tech-item"><div class="tech-label">LLM / AI</div><div class="tech-value">{llm_model_label} via Gemini OpenAI-compatible API</div></div>
                 <div class="tech-item"><div class="tech-label">Framework</div><div class="tech-value">FastAPI + Pydantic V2</div></div>
                 <div class="tech-item"><div class="tech-label">Architecture</div><div class="tech-value">Multi-Agent Orchestration (4 agents)</div></div>
                 <div class="tech-item"><div class="tech-label">Knowledge Base</div><div class="tech-value">RAG + ChromaDB Vector Store</div></div>
-                <div class="tech-item"><div class="tech-label">Database</div><div class="tech-value">PostgreSQL + SQLModel (async)</div></div>
-                <div class="tech-item"><div class="tech-label">Cache</div><div class="tech-value">Redis (response caching)</div></div>
-                <div class="tech-item"><div class="tech-label">Infrastructure</div><div class="tech-value">Docker + DigitalOcean</div></div>
-                <div class="tech-item"><div class="tech-label">Observability</div><div class="tech-value">LangSmith + Structured Logging</div></div>
-                <div class="tech-item"><div class="tech-label">Evaluation</div><div class="tech-value">Behavioral Grading Framework</div></div>
-                <div class="tech-item"><div class="tech-label">Concurrency</div><div class="tech-value">ThreadPoolExecutor (parallel agents)</div></div>
-                <div class="tech-item"><div class="tech-label">Security</div><div class="tech-value">API Key Auth + Rate Limiting</div></div>
-                <div class="tech-item"><div class="tech-label">Prompt Engineering</div><div class="tech-value">V2 Optimized + Few-shot</div></div>
+                <div class="tech-item"><div class="tech-label">Database</div><div class="tech-value">PostgreSQL + SQLModel + async SQLAlchemy</div></div>
+                <div class="tech-item"><div class="tech-label">Cache</div><div class="tech-value">Redis LLM response cache</div></div>
+                <div class="tech-item"><div class="tech-label">Infrastructure</div><div class="tech-value">Azure VM + Docker Compose + GitHub Actions</div></div>
+                <div class="tech-item"><div class="tech-label">Observability</div><div class="tech-value">Structured JSON logs + optional LangSmith tracing</div></div>
+                <div class="tech-item"><div class="tech-label">Evaluation</div><div class="tech-value">Deterministic behavioral grading</div></div>
+                <div class="tech-item"><div class="tech-label">Concurrency</div><div class="tech-value">ThreadPoolExecutor for agents 2–3</div></div>
+                <div class="tech-item"><div class="tech-label">Security</div><div class="tech-value">API key + portfolio Basic Auth</div></div>
+                <div class="tech-item"><div class="tech-label">Prompt Engineering</div><div class="tech-value">Grounded prompts + Pydantic structured outputs</div></div>
             </div>
         </div>
 
         <div class="section">
-            <h2>Live Demo Output</h2>
-            <p style="color: #8b949e; margin-bottom: 12px; font-size: 0.9em;">Real AI analysis generated at server startup — not hardcoded, produced by 4 LLM agents in parallel</p>
-            <div class="demo">
-                <div class="demo-row"><span class="demo-label">Risk Level</span><span class="demo-value high">{risk.get('risk_level', 'N/A')} ({risk.get('risk_score', 0)}/100)</span></div>
-                <div class="demo-row"><span class="demo-label">Risk Factors</span><span class="demo-value">{', '.join(risk_factors[:4]) if risk_factors else 'N/A'}</span></div>
-                <div class="demo-row"><span class="demo-label">Carrier</span><span class="demo-value">{carrier.get('recommended_carrier', 'N/A')} {'(upgrade)' if carrier.get('should_upgrade') else ''}</span></div>
-                <div class="demo-row"><span class="demo-label">Cost Impact</span><span class="demo-value">+R${carrier.get('cost_impact', 0):.0f}</span></div>
-                <div class="demo-row"><span class="demo-label">Recovery</span><span class="demo-value">{recovery.get('voucher_code') or 'None'} ({recovery.get('discount_percentage', 0):.0f}%)</span></div>
-                <div class="demo-row"><span class="demo-label">Retention</span><span class="demo-value good">{recovery.get('retention_probability', 0):.0f}%</span></div>
-                <div class="demo-row"><span class="demo-label">Confidence</span><span class="demo-value good">{demo.get('confidence_score', 0):.0f}/100</span></div>
-                <div class="demo-row" style="flex-direction: column; gap: 4px;"><span class="demo-label">Executive Summary</span><span class="demo-value" style="font-size: 0.85em; line-height: 1.5;">{demo.get('executive_summary', 'N/A')}</span></div>
+            <h2>Latest Analysis Result</h2>
+            <p style="color: #8b949e; margin-bottom: 12px; font-size: 0.9em;">This panel is updated with the actual API response after every scenario run.</p>
+            <div id="live-result">
+                <div class="demo"><span class="demo-label">Select a scenario below to run ML, RAG and the four-agent workflow.</span></div>
             </div>
         </div>
 
         <div class="section">
             <h2>Run Live AI Analysis</h2>
-            <p style="color: #8b949e; margin-bottom: 16px; font-size: 0.9em;">Click a scenario to trigger real-time ML prediction + multi-agent LLM analysis (~12-20s)</p>
+            <p style="color: #8b949e; margin-bottom: 16px; font-size: 0.9em;">Click a scenario to trigger the real ML, RAG and multi-agent workflow. Runtime depends on the provider and Redis cache.</p>
             <div class="grid" style="grid-template-columns: repeat(3, 1fr);">
-                <button class="scenario-btn" onclick="runScenario('high')"><div class="scenario-title">HIGH RISK</div><div class="scenario-desc">2800km · 4500g · weekend</div></button>
-                <button class="scenario-btn" onclick="runScenario('moderate')"><div class="scenario-title">MODERATE RISK</div><div class="scenario-desc">650km · 2000g · weekday</div></button>
-                <button class="scenario-btn" onclick="runScenario('low')"><div class="scenario-title">LOW RISK</div><div class="scenario-desc">45km · 300g · on time</div></button>
+                <button class="scenario-btn" onclick="runScenario('high')"><div class="scenario-title">LONG-HAUL</div><div class="scenario-desc">2800km · 4500g · weekend</div></button>
+                <button class="scenario-btn" onclick="runScenario('moderate')"><div class="scenario-title">REGIONAL</div><div class="scenario-desc">650km · 2000g · weekday</div></button>
+                <button class="scenario-btn" onclick="runScenario('low')"><div class="scenario-title">LOCAL</div><div class="scenario-desc">45km · 300g · on time</div></button>
             </div>
             <div id="live-status" style="margin-top: 16px; display: none;">
                 <div class="loading-bar"><div class="loading-fill" id="loading-fill"></div></div>
                 <p id="status-text" style="color: #8b949e; font-size: 0.85em; margin-top: 8px;"></p>
             </div>
-            <div id="live-result" style="margin-top: 16px; display: none;"></div>
         </div>
 
         <div class="section">
@@ -161,17 +146,17 @@ def build_home_page(base_url: str, demo: Dict[str, Any]) -> str:
                 <div class="card"><div class="card-title">Score-Level Alignment</div><div class="card-sub">Validates risk_score matches risk_level range</div><div class="grade-bar"><div class="grade-fill grade-excellent" style="width: 25%;"></div></div><div class="card-sub" style="margin-top: 4px;">25 points</div></div>
                 <div class="card"><div class="card-title">Factor Specificity</div><div class="card-sub">Requires measurable factors with units (km, kg, days)</div><div class="grade-bar"><div class="grade-fill grade-excellent" style="width: 20%;"></div></div><div class="card-sub" style="margin-top: 4px;">20 points</div></div>
                 <div class="card"><div class="card-title">Logic Consistency</div><div class="card-sub">upgrade=true → cost&gt;0, discount matches voucher</div><div class="grade-bar"><div class="grade-fill grade-good" style="width: 20%;"></div></div><div class="card-sub" style="margin-top: 4px;">20 points</div></div>
-                <div class="card"><div class="card-title">ROI Analysis</div><div class="card-sub">Numerical cost-benefit calculation required</div><div class="grade-bar"><div class="grade-fill grade-good" style="width: 25%;"></div></div><div class="card-sub" style="margin-top: 4px;">25 points</div></div>
+                <div class="card"><div class="card-title">Financial Grounding</div><div class="card-sub">Uses verified quote costs and accepts an explicit data limitation</div><div class="grade-bar"><div class="grade-fill grade-good" style="width: 25%;"></div></div><div class="card-sub" style="margin-top: 4px;">25 points</div></div>
             </div>
         </div>
 
         <div class="section">
             <h2>Performance Metrics</h2>
-            <p style="color: #8b949e; margin-bottom: 12px; font-size: 0.9em;">Aggregated across multiple test scenarios</p>
+            <p style="color: #8b949e; margin-bottom: 12px; font-size: 0.9em;">Updated from the latest live API response</p>
             <div class="grid">
-                <div class="card"><div class="card-title">Processing Time</div><div class="card-value">~12s</div><div class="card-sub">4 LLM calls (3 parallel + 1 sequential)</div></div>
-                <div class="card"><div class="card-title">Grading Score</div><div class="card-value" style="color: #3fb950;">97/100</div><div class="card-sub">Behavioral validation across 3 agents</div></div>
-                <div class="card"><div class="card-title">Agent Consensus</div><div class="card-value">85-95%</div><div class="card-sub">Cross-agent decision alignment</div></div>
+                <div class="card"><div class="card-title">Processing Time</div><div id="metric-processing" class="card-value">—</div><div class="card-sub">Includes ML, RAG and agent orchestration</div></div>
+                <div class="card"><div class="card-title">Grading Score</div><div id="metric-grading" class="card-value" style="color: #3fb950;">—</div><div class="card-sub">Deterministic grading across 3 specialist outputs</div></div>
+                <div class="card"><div class="card-title">Decision Confidence</div><div id="metric-confidence" class="card-value">—</div><div class="card-sub">Bounded evidence-quality estimate</div></div>
             </div>
         </div>
 
@@ -198,6 +183,12 @@ def build_home_page(base_url: str, demo: Dict[str, Any]) -> str:
     </div>
     <script>
     const DEMO_URL = "{base_url}/demo/analyze";
+    function escapeHtml(value) {{
+        const node = document.createElement('div');
+        node.textContent = String(value ?? '');
+        return node.innerHTML;
+    }}
+
     async function runScenario(level) {{
         const btns = document.querySelectorAll('.scenario-btn');
         btns.forEach(b => b.disabled = true);
@@ -223,11 +214,32 @@ def build_home_page(base_url: str, demo: Dict[str, Any]) -> str:
             loadingFill.style.width = '100%';
             if (!resp.ok) {{ const err = await resp.json(); statusText.textContent = 'Error: ' + (err.detail || resp.statusText); btns.forEach(b => b.disabled = false); return; }}
             const data = await resp.json();
-            statusText.textContent = `Completed in ${{(data.processing_time_ms / 1000).toFixed(1)}}s`;
+            const elapsedSeconds = (data.processing_time_ms / 1000).toFixed(1);
+            const fallbackLabel = data.fallback_used ? ' · deterministic fallback' : '';
+            statusText.textContent = `Completed in ${{elapsedSeconds}}s${{fallbackLabel}}`;
             const d = data.decision, g = data.grading, ml = data.ml_prediction;
+            document.getElementById('metric-processing').textContent = `${{elapsedSeconds}}s`;
+            document.getElementById('metric-grading').textContent = `${{g.overall_score}}/100`;
+            document.getElementById('metric-confidence').textContent = `${{d.confidence_score}}/100`;
             const riskColor = d.risk_assessment.risk_level === 'HIGH' || d.risk_assessment.risk_level === 'CRITICAL' ? '#f85149' : d.risk_assessment.risk_level === 'MODERATE' ? '#d29922' : '#3fb950';
-            resultDiv.innerHTML = `<div class="demo" style="border-color: ${{riskColor}};"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;"><span style="color:${{riskColor}};font-weight:700;font-size:1.1em;">${{d.risk_assessment.risk_level}} RISK (${{d.risk_assessment.risk_score}}/100)</span><span style="color:#3fb950;font-size:0.9em;">Grading: ${{g.overall_score}}/100 (${{g.quality_level}})</span></div><div class="demo-row" style="background:#1c2128;padding:8px;border-radius:4px;margin-bottom:8px;"><span class="demo-label" style="color:#58a6ff;">ML Prediction (XGBoost)</span><span class="demo-value" style="color:#58a6ff;">${{ml.predicted_days}} days ${{ml.ml_model_used ? '✓ model used' : '(fallback)'}}</span></div><div class="demo-row"><span class="demo-label">Risk Factors</span><span class="demo-value">${{d.risk_assessment.primary_risk_factors.join(', ')}}</span></div><div class="demo-row"><span class="demo-label">Analysis</span><span class="demo-value" style="font-size:0.83em;max-width:650px;">${{d.risk_assessment.analysis}}</span></div><div class="demo-row"><span class="demo-label">Carrier</span><span class="demo-value">${{d.carrier_recommendation.recommended_carrier}} ${{d.carrier_recommendation.should_upgrade ? '(upgrade)' : ''}}</span></div><div class="demo-row"><span class="demo-label">ROI</span><span class="demo-value" style="font-size:0.83em;max-width:650px;">${{d.carrier_recommendation.roi_analysis}}</span></div><div class="demo-row"><span class="demo-label">Recovery</span><span class="demo-value">${{d.recovery_plan.voucher_code || 'None'}} (${{d.recovery_plan.discount_percentage}}% off)</span></div><div class="demo-row" style="flex-direction:column;gap:6px;padding-top:10px;border-top:1px solid #30363d;"><span class="demo-label">Executive Summary</span><span class="demo-value" style="font-size:0.88em;line-height:1.6;">${{d.executive_summary}}</span></div><div style="margin-top:12px;padding-top:10px;border-top:1px solid #21262d;display:flex;gap:20px;font-size:0.8em;color:#8b949e;"><span>Confidence: <strong style="color:#f0f6fc;">${{d.confidence_score}}/100</strong></span><span>Time: <strong style="color:#f0f6fc;">${{(data.processing_time_ms/1000).toFixed(1)}}s</strong></span></div></div>`;
+            const view = {{
+                riskLevel: escapeHtml(d.risk_assessment.risk_level),
+                riskScore: escapeHtml(d.risk_assessment.risk_score),
+                qualityLevel: escapeHtml(g.quality_level),
+                gradingScore: escapeHtml(g.overall_score),
+                predictedDays: escapeHtml(ml.predicted_days),
+                riskFactors: escapeHtml(d.risk_assessment.primary_risk_factors.join(', ')),
+                analysis: escapeHtml(d.risk_assessment.analysis),
+                carrier: escapeHtml(d.carrier_recommendation.recommended_carrier),
+                roi: escapeHtml(d.carrier_recommendation.roi_analysis),
+                voucher: escapeHtml(d.recovery_plan.voucher_code || 'None'),
+                discount: escapeHtml(d.recovery_plan.discount_percentage),
+                summary: escapeHtml(d.executive_summary),
+                confidence: escapeHtml(d.confidence_score),
+            }};
+            resultDiv.innerHTML = `<div class="demo" style="border-color: ${{riskColor}};"><div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;"><span style="color:${{riskColor}};font-weight:700;font-size:1.1em;">${{view.riskLevel}} RISK (${{view.riskScore}}/100)</span><span style="color:#3fb950;font-size:0.9em;">Grading: ${{view.gradingScore}}/100 (${{view.qualityLevel}})</span></div><div class="demo-row" style="background:#1c2128;padding:8px;border-radius:4px;margin-bottom:8px;"><span class="demo-label" style="color:#58a6ff;">ML Prediction (XGBoost)</span><span class="demo-value" style="color:#58a6ff;">${{view.predictedDays}} days ${{ml.ml_model_used ? '✓ model used' : '(fallback)'}}</span></div><div class="demo-row"><span class="demo-label">Risk Factors</span><span class="demo-value">${{view.riskFactors}}</span></div><div class="demo-row"><span class="demo-label">Analysis</span><span class="demo-value" style="font-size:0.83em;max-width:650px;">${{view.analysis}}</span></div><div class="demo-row"><span class="demo-label">Carrier</span><span class="demo-value">${{view.carrier}} ${{d.carrier_recommendation.should_upgrade ? '(upgrade)' : ''}}</span></div><div class="demo-row"><span class="demo-label">ROI</span><span class="demo-value" style="font-size:0.83em;max-width:650px;">${{view.roi}}</span></div><div class="demo-row"><span class="demo-label">Recovery</span><span class="demo-value">${{view.voucher}} (${{view.discount}}% off)</span></div><div class="demo-row" style="flex-direction:column;gap:6px;padding-top:10px;border-top:1px solid #30363d;"><span class="demo-label">Executive Summary</span><span class="demo-value" style="font-size:0.88em;line-height:1.6;">${{view.summary}}</span></div><div style="margin-top:12px;padding-top:10px;border-top:1px solid #21262d;display:flex;gap:20px;font-size:0.8em;color:#8b949e;"><span>Confidence: <strong style="color:#f0f6fc;">${{view.confidence}}/100</strong></span><span>Time: <strong style="color:#f0f6fc;">${{elapsedSeconds}}s</strong></span></div></div>`;
             resultDiv.style.display = 'block';
+            resultDiv.scrollIntoView({{ behavior: 'smooth', block: 'center' }});
         }} catch (e) {{ clearInterval(interval); statusText.textContent = 'Network error: ' + e.message; }}
         btns.forEach(b => b.disabled = false);
     }}

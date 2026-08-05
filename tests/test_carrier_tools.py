@@ -149,3 +149,40 @@ def test_recovery_agent_enforces_voucher_policy(monkeypatch):
     assert result["voucher_code"] is None
     assert result["discount_percentage"] == 0
     assert "on track" in result["communication_template"]
+
+
+def test_risk_agent_enforces_score_level_and_grounded_narrative(monkeypatch):
+    """Generated scoring and unsupported statistics cannot reach the API."""
+
+    def fake_llm(*args, **kwargs):
+        return json.dumps({
+            "risk_level": "CRITICAL",
+            "risk_score": 80,
+            "primary_risk_factors": ["Unsupported remote-region risk"],
+            "mitigation_priority": "URGENT",
+            "analysis": (
+                "This is a critical risk with average delivery of 15-30 days "
+                "and a 98% failure probability."
+            ),
+        })
+
+    monkeypatch.setattr(agents, "call_ollama", fake_llm)
+    scenario = agents.DeliveryScenario(
+        predicted_days=6.9,
+        promised_days=7,
+        distance_km=2800,
+        weight_g=4500,
+        payment_lag_days=5,
+        is_weekend_order=1,
+        freight_value=65,
+        rag_context="General long-haul guidance.",
+    )
+
+    result = agents.run_risk_assessment(scenario)
+
+    assert result["risk_score"] == 40
+    assert result["risk_level"] == "LOW"
+    assert result["mitigation_priority"] == "MEDIUM"
+    assert "15-30" not in result["analysis"]
+    assert "98%" not in result["analysis"]
+    assert "40/100" in result["analysis"]

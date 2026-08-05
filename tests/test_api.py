@@ -156,7 +156,11 @@ class TestAnalyzeEndpoint:
 
         # Check decision content
         decision = data["decision"]
-        assert decision["risk_assessment"]["risk_level"] == "HIGH"
+        assert decision["risk_assessment"]["risk_level"] == "MODERATE"
+        assert decision["risk_assessment"]["risk_score"] == 60
+        assert "Weekend order" not in " ".join(
+            decision["risk_assessment"]["primary_risk_factors"]
+        )
         assert decision["carrier_recommendation"]["should_upgrade"] is True
         assert decision["recovery_plan"]["voucher_code"] == "DELAY50"
 
@@ -326,6 +330,12 @@ class TestPortfolioAuth:
         response = client.get("/", headers={"Authorization": f"Basic {creds}"})
         assert response.status_code == 200
         assert "Multi-Agent" in response.text
+        assert response.headers["Cache-Control"] == "no-store"
+        assert "Azure VM + Docker Compose + GitHub Actions" in response.text
+        assert "DigitalOcean" not in response.text
+        assert "Rate Limiting" not in response.text
+        assert "Few-shot" not in response.text
+        assert 'id="metric-processing"' in response.text
 
 
 class TestDebugEndpointAuth:

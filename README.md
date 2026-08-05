@@ -47,24 +47,25 @@ Delivery Scenario Input (distance, weight, time, payment)
 | **Framework** | FastAPI + Pydantic V2 |
 | **Architecture** | Multi-Agent Orchestration (4 agents) |
 | **Knowledge Base** | RAG + ChromaDB Vector Store |
-| **Database** | PostgreSQL + SQLModel (async) |
-| **Cache** | Redis (response caching) |
-| **Infrastructure** | Docker Compose + Azure VM + GitHub Actions |
-| **Observability** | LangSmith + Structured JSON Logging |
-| **Evaluation** | Behavioral Grading Framework |
+| **Database** | PostgreSQL + SQLModel + async SQLAlchemy |
+| **Cache** | Redis LLM response cache |
+| **Infrastructure** | Azure VM + Docker Compose + GitHub Actions |
+| **Observability** | Structured JSON logs + optional LangSmith tracing |
+| **Evaluation** | Deterministic behavioral grading |
+| **Concurrency** | ThreadPoolExecutor for Agents 2–3 |
 | **Security** | API Key Auth + Basic Auth (portfolio) |
-| **Prompt Engineering** | Centralized constrained prompts with JSON contracts |
+| **Prompt Engineering** | Grounded prompts + Pydantic structured outputs |
 
 ---
 
 ## Key Features
 
-- **Real-time AI Analysis** — 4 LLM calls in ~12-15s with parallel execution
+- **Real-time AI Analysis** — 4 LLM calls with Agents 2–3 executed in parallel
 - **Behavioral Grading** — validates logic consistency, not just output format (score-level alignment, factor specificity, ROI analysis)
 - **Bounded LLM Calls** — client timeout, workflow timeout, and 3 application-level retry attempts
 - **Typed Carrier Tool** — Pydantic contracts keep price, availability, and transit data deterministic
 - **RAG Integration** — 6 logistics knowledge base documents for context-aware decisions
-- **Live Demo** — interactive portfolio page with 3 predefined scenarios (HIGH/MODERATE/LOW risk)
+- **Live Demo** — interactive portfolio page with long-haul, regional, and local scenarios
 - **Audit Trail** — PostgreSQL JSON storage for successful authenticated analyses
 
 ---

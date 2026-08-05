@@ -329,34 +329,6 @@ from templates import build_home_page
 # ===== APPLICATION INSTANCE & STATE =====
 
 app_state = AppState()
-DEMO_ANALYSIS_PAYLOAD: Dict[str, Any] = {
-    "risk_assessment": {
-        "risk_level": "MODERATE",
-        "risk_score": 65.0,
-        "primary_risk_factors": [
-            "Predicted delivery versus promised window",
-            "Distance",
-            "Weight",
-            "Payment lag",
-        ],
-    },
-    "carrier_recommendation": {
-        "recommended_carrier": "Regional",
-        "should_upgrade": True,
-        "cost_impact": 15.0,
-    },
-    "recovery_plan": {
-        "voucher_code": "DELAY25",
-        "discount_percentage": 25.0,
-        "retention_probability": 75.0,
-    },
-    "executive_summary": (
-        "The delivery is slightly late, so we recommend a regional carrier "
-        "upgrade and a DELAY25 voucher to reduce risk and protect retention."
-    ),
-    "estimated_delivery_time": 7.0,
-    "confidence_score": 78.0,
-}
 
 
 @asynccontextmanager
@@ -453,7 +425,11 @@ async def root(request: Request) -> Response:
         base_url = f"{scheme}://{host}:{port}"
     else:
         base_url = f"{scheme}://{host}"
-    return HTMLResponse(content=build_home_page(base_url, DEMO_ANALYSIS_PAYLOAD))
+    llm_model = get_llm_config()["model"]
+    return HTMLResponse(
+        content=build_home_page(base_url, llm_model),
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @app.get("/health", response_model=HealthResponse, tags=["Monitoring"])
