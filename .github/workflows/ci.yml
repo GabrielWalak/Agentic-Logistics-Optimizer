@@ -119,9 +119,17 @@ jobs:
         with:
           context: .
           push: false
+          load: true
           tags: ${{ env.IMAGE_REPOSITORY }}:ci
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Sprawdź skrypty startowe w obrazie
+        run: >-
+          docker run --rm
+          --entrypoint /bin/bash
+          ${{ env.IMAGE_REPOSITORY }}:ci
+          -n /app/entrypoint.sh
 
   deploy:
     name: Wdrożenie na Azure VM

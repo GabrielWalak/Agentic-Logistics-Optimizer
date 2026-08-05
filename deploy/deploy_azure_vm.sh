@@ -116,8 +116,29 @@ if [[ -z "$previous_compose" ]] && docker inspect agentic-logistics-api >/dev/nu
   )"
 fi
 
+rollback() {
+  if [[ -z "$previous_image" || ! -f "$previous_compose" ]]; then
+    log "No previous release is available for rollback"
+    return 1
+  fi
+
+  log "Rolling back to $previous_image"
+  compose "$previous_image" "$previous_compose" up --detach --remove-orphans
+  if wait_for_application; then
+    log "Rollback completed; the deployment remains failed"
+    return 0
+  fi
+
+  log "Rollback health check also failed"
+  return 1
+}
+
 log "Starting the production stack"
-compose "$IMAGE_REF" "$COMPOSE_FILE" up --detach --remove-orphans
+if ! compose "$IMAGE_REF" "$COMPOSE_FILE" up --detach --remove-orphans; then
+  log "Compose failed before the application health check"
+  rollback || true
+  exit 1
+fi
 
 if wait_for_application; then
   printf '%s\n' "$IMAGE_REF" > "$IMAGE_MARKER"
@@ -134,16 +155,6 @@ fi
 log "Health check failed"
 compose "$IMAGE_REF" "$COMPOSE_FILE" logs --tail 100 app || true
 
-if [[ -n "$previous_image" && -f "$previous_compose" ]]; then
-  log "Rolling back to $previous_image"
-  compose "$previous_image" "$previous_compose" up --detach --remove-orphans
-  if wait_for_application; then
-    log "Rollback completed; the deployment remains failed"
-  else
-    log "Rollback health check also failed"
-  fi
-else
-  log "No previous release is available for rollback"
-fi
+rollback || true
 
 exit 1

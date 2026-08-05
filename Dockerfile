@@ -34,8 +34,11 @@ COPY logistics_docs/ ./logistics_docs/
 COPY templates/ ./templates/
 COPY xgboost_model.pkl .
 
-# Make entrypoint executable
-RUN chmod +x entrypoint.sh
+# Normalize shell scripts defensively even when a release was prepared on
+# Windows, then verify the entrypoint before the image can be published.
+RUN sed -i 's/\r$//' entrypoint.sh \
+    && bash -n entrypoint.sh \
+    && chmod +x entrypoint.sh
 
 # Create chroma_db directory
 RUN mkdir -p ./chroma_db
