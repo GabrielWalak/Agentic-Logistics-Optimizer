@@ -56,10 +56,10 @@ jobs:
 
     steps:
       - name: Pobierz kod
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Skonfiguruj Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: ${{ env.PYTHON_VERSION }}
           cache: pip
@@ -107,13 +107,13 @@ jobs:
 
     steps:
       - name: Pobierz kod
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Skonfiguruj Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Zbuduj obraz bez publikowania
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           push: false
@@ -135,7 +135,7 @@ jobs:
 
     steps:
       - name: Pobierz kod
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Skonfiguruj bezpieczne połączenie SSH
         env:
