@@ -1,13 +1,14 @@
+"""Multi-agent logistics workflow built with Pydantic contracts.
+
+The module keeps orchestration explicit: specialized LLM calls produce typed
+results and deterministic Python code validates business-critical values.
 """
-PydanticAI Multi-Agent System for OLIST Logistics
-Enterprise-grade agent architecture with specialized responsibilities
-Using direct Ollama API for reliability
-"""
+import json
 import os
-import sys
-import time
 import re
 import hashlib
+import sys
+import time
 
 # Fix encoding on Windows
 if sys.platform == 'win32':
@@ -21,8 +22,19 @@ if sys.platform == 'win32':
 from pydantic import BaseModel, Field
 from typing import Optional, List, Dict
 from openai import OpenAI
-import json
 from dotenv import load_dotenv
+
+from carrier_tools import (
+    CarrierQuote,
+    get_all_carrier_quotes,
+    select_carrier_quote,
+)
+from prompt_engineering import (
+    CARRIER_AGENT_PROMPT,
+    ORCHESTRATOR_PROMPT,
+    RECOVERY_AGENT_PROMPT,
+    RISK_AGENT_PROMPT,
+)
 
 # Load environment variables from .env file
 load_dotenv()
@@ -81,6 +93,9 @@ class CarrierRecommendation(BaseModel):
     upgrade_rationale: str = Field(default="", description="Justification for upgrade")
     cost_impact: float = Field(default=0.0, description="Additional cost in BRL")
     roi_analysis: str = Field(default="", description="ROI calculation")
+    estimated_cost: float = Field(default=0.0, description="Verified quoted cost in BRL")
+    estimated_transit_days: float = Field(default=0.0, description="Verified carrier transit estimate")
+    quote_source: str = Field(default="", description="Source of carrier quote data")
 
 
 class CustomerRecoveryPlan(BaseModel):
@@ -105,12 +120,23 @@ class IntegratedDecision(BaseModel):
 # ===== GITHUB MODELS CLIENT =====
 
 def _get_github_client() -> OpenAI:
-    """Initialize OpenAI client configured for GitHub Models API"""
+    """Initialize a bounded client for the GitHub Models API.
+
+    SDK retries are disabled because ``call_ollama`` owns the retry policy. This
+    prevents one logical attempt from expanding into nested, unobservable
+    retries inside the client.
+    """
     token = os.getenv("GITHUB_TOKEN", "").strip()
     if not token:
         raise ValueError("Missing GITHUB_TOKEN environment variable. Set it in .env or export GITHUB_TOKEN=...")
     base_url = os.getenv("GITHUB_MODELS_BASE_URL", "https://models.inference.ai.azure.com")
-    return OpenAI(base_url=base_url, api_key=token)
+    timeout_seconds = float(os.getenv("LLM_REQUEST_TIMEOUT_SECONDS", "20"))
+    return OpenAI(
+        base_url=base_url,
+        api_key=token,
+        timeout=timeout_seconds,
+        max_retries=0,
+    )
 
 
 # ===== OLLAMA DIRECT API =====
@@ -131,14 +157,29 @@ def call_ollama(
     
     Raises LLMError if all retries fail, instead of returning silent fallback JSON.
     """
-    cache_key = rag_cache.make_key(system_prompt + user_prompt)
+    model_name = model or os.getenv("GITHUB_MODEL", "gpt-4o-mini")
+    temperature = float(os.getenv("LLM_TEMPERATURE", "0.3"))
+    top_p = float(os.getenv("LLM_TOP_P", "0.9"))
+
+    # Model parameters are part of the key so configuration changes cannot
+    # accidentally reuse an answer produced under different sampling settings.
+    cache_material = json.dumps(
+        {
+            "model": model_name,
+            "temperature": temperature,
+            "top_p": top_p,
+            "system_prompt": system_prompt,
+            "user_prompt": user_prompt,
+        },
+        sort_keys=True,
+    )
+    cache_key = rag_cache.make_key(cache_material)
     cached = rag_cache.get(cache_key)
     if cached:
         if stream:
             print("[cached] ", end="", flush=True)
         return cached
 
-    model_name = model or os.getenv("GITHUB_MODEL", "gpt-4o-mini")
     last_error = None
 
     for attempt in range(1, max_retries + 1):
@@ -151,9 +192,9 @@ def call_ollama(
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-                temperature=float(os.getenv("LLM_TEMPERATURE", "0.3")),
+                temperature=temperature,
                 max_tokens=int(os.getenv("LLM_MAX_TOKENS", "1024")),
-                top_p=float(os.getenv("LLM_TOP_P", "0.9")),
+                top_p=top_p,
                 stream=stream,
             )
 
@@ -183,7 +224,7 @@ def call_ollama(
             last_error = e
             print(f"  ⚠ LLM attempt {attempt}/{max_retries} failed: {str(e)[:100]}")
             if attempt < max_retries:
-                time.sleep(1.5 * attempt)  # Exponential backoff
+                time.sleep(1.5 * attempt)  # Short incremental backoff
 
     # All retries exhausted
     error_msg = f"GitHub Models API failed after {max_retries} attempts: {str(last_error)}"
@@ -222,17 +263,30 @@ def parse_json_response(response: str) -> Dict:
 # ===== REDIS CACHE MANAGER =====
 
 class RAGCache:
-    """Redis-based cache for RAG queries"""
+    """Best-effort Redis cache for LLM responses.
+
+    The historical class name is kept for compatibility. Redis failures never
+    fail an analysis; they only remove the cache optimization.
+    """
     def __init__(self):
         self.enabled = False
         if REDIS_AVAILABLE:
             try:
-                self.redis = redis.Redis(
-                    host=os.getenv('REDIS_HOST', 'localhost'),
-                    port=6379,
-                    decode_responses=True,
-                    socket_connect_timeout=2
-                )
+                redis_url = os.getenv("REDIS_URL", "").strip()
+                if redis_url:
+                    self.redis = redis.Redis.from_url(
+                        redis_url,
+                        decode_responses=True,
+                        socket_connect_timeout=2,
+                    )
+                else:
+                    self.redis = redis.Redis(
+                        host=os.getenv("REDIS_HOST", "localhost"),
+                        port=int(os.getenv("REDIS_PORT", "6379")),
+                        db=int(os.getenv("REDIS_DB", "0")),
+                        decode_responses=True,
+                        socket_connect_timeout=2,
+                    )
                 self.redis.ping()
                 self.enabled = True
                 print("✓ Redis cache enabled")
@@ -257,6 +311,16 @@ class RAGCache:
             self.redis.setex(key, ttl, value)
         except Exception:
             pass
+
+    def is_healthy(self) -> bool:
+        """Return the live cache status without leaking connection details."""
+        if not self.enabled:
+            return False
+        try:
+            return bool(self.redis.ping())
+        except Exception:
+            self.enabled = False
+            return False
     
     @staticmethod
     def make_key(prompt: str) -> str:
@@ -311,60 +375,6 @@ def coerce_to_string(value, default: str) -> str:
         return str(value)
     except (ValueError, TypeError):
         return default
-
-
-# ===== AGENT SYSTEM PROMPTS =====
-
-RISK_AGENT_PROMPT = """You are a Senior Risk Assessment Specialist for OLIST Logistics.
-
-Your role:
-1. Analyze delivery risk factors based on provided scenario and knowledge base
-2. Identify primary risk contributors (distance, weight, payment lag, weekend, etc.)
-3. Assign risk level: MINIMAL, LOW, MODERATE, HIGH, or CRITICAL
-4. Calculate risk score (0-100) based on multiple factors
-5. Prioritize mitigation actions
-
-Be precise, data-driven, and reference specific rules from the knowledge base.
-Return JSON format: {"risk_level": "...", "risk_score": X, "primary_risk_factors": [...], "mitigation_priority": "...", "analysis": "..."}"""
-
-CARRIER_AGENT_PROMPT = """You are a Carrier Optimization Expert for OLIST Logistics.
-
-Your role:
-1. Recommend optimal carrier based on scenario (Standard, Premium Express, SEDEX, Regional)
-2. Evaluate cost vs. benefit of carrier upgrades
-3. Calculate ROI comparing upgrade cost vs. penalty costs
-4. Reference specific carrier rules from knowledge base
-5. Justify recommendations with financial analysis
-
-Return JSON format: {"recommended_carrier": "...", "current_carrier": "Standard Shipping", "should_upgrade": true/false, "upgrade_rationale": "...", "cost_impact": X, "roi_analysis": "..."}"""
-
-RECOVERY_AGENT_PROMPT = """You are a Customer Recovery & Retention Strategist for OLIST.
-
-Your role:
-1. Design recovery strategy for at-risk deliveries
-2. Select appropriate voucher code (DELAY15, DELAY25, DELAY50, EXPRESS_FREE)
-3. Craft customer communication templates
-4. Optimize timing for proactive outreach
-5. Estimate retention probability as percentage (0-100)
-
-Voucher system:
-- DELAY15 (15%): 1-3 days delay
-- DELAY25 (25%): 3-7 days delay  
-- DELAY50 (50% + free shipping): >7 days delay
-- EXPRESS_FREE: Carrier fault
-
-Return JSON format: {"voucher_code": "...", "discount_percentage": X, "communication_template": "...", "timing": "...", "retention_probability": X}"""
-
-ORCHESTRATOR_PROMPT = """You are the Chief Logistics Decision Officer for OLIST.
-
-Your role:
-1. Integrate insights from risk, carrier, and recovery specialists
-2. Create cohesive action plan balancing all factors
-3. Generate executive summary for stakeholders
-4. Assign overall confidence score to recommendations (0-100)
-5. Provide final delivery time estimate
-
-Return JSON format: {"executive_summary": "...", "estimated_delivery_time": X, "confidence_score": X}"""
 
 
 # ===== AGENT EXECUTION FUNCTIONS =====
@@ -435,11 +445,23 @@ Provide risk assessment in JSON format."""
 
 @traceable(name="carrier_optimization_agent")
 def run_carrier_optimization(scenario: DeliveryScenario, risk: Dict) -> Dict:
-    """Agent 2: Carrier Optimization. Raises LLMError on failure."""
+    """Agent 2: select a carrier using verified, typed quote data.
+
+    The LLM explains the trade-off, while Python owns availability, price, and
+    transit-time values. This boundary prevents generated financial data from
+    being presented as an operational quote.
+    """
+    quotes: List[CarrierQuote] = get_all_carrier_quotes(
+        distance_km=scenario.distance_km,
+        weight_g=scenario.weight_g,
+    )
+    quote_payload = [quote.model_dump() for quote in quotes]
+
     user_prompt = f"""Optimize carrier selection for:
 
 Scenario:
 - Predicted: {scenario.predicted_days} days
+- Promised: {scenario.promised_days} days
 - Distance: {scenario.distance_km}km
 - Weight: {scenario.weight_g}g
 - Freight: R${scenario.freight_value}
@@ -448,54 +470,88 @@ Risk Assessment:
 - Level: {risk['risk_level']}
 - Score: {risk['risk_score']}/100
 
+Verified carrier quotes produced by the carrier quote tool:
+{json.dumps(quote_payload, ensure_ascii=False)}
+
 Knowledge Base:
 {scenario.rag_context[:1000]}
 
-Recommend carrier and calculate ROI in JSON format."""
+Select only an available carrier. Use the verified quote values and return the
+required JSON object."""
 
     response = call_ollama(CARRIER_AGENT_PROMPT, user_prompt)
     result = parse_json_response(response)
     
-    # Determine if upgrade is needed
+    llm_upgrade = result.get("should_upgrade", False)
+    if isinstance(llm_upgrade, str):
+        llm_upgrade = llm_upgrade.strip().lower() in {"true", "yes", "1"}
+
+    # Business rules have precedence over the model's upgrade preference.
     should_upgrade = (
         risk['risk_level'] in ['HIGH', 'CRITICAL'] or
         scenario.predicted_days > scenario.promised_days or
-        result.get("should_upgrade", False)
+        bool(llm_upgrade)
     )
-    
-    # Validate cost_impact
-    cost_impact_value = coerce_to_float(result.get("cost_impact"), 35.0 if should_upgrade else 0.0)
+
+    selected_quote = select_carrier_quote(
+        quotes=quotes,
+        requested_carrier=coerce_to_string(
+            result.get("recommended_carrier"),
+            "Premium Express",
+        ),
+        should_upgrade=should_upgrade,
+    )
+    # Selecting any carrier other than the current one is operationally an
+    # upgrade, even when the LLM returned an inconsistent boolean flag.
+    should_upgrade = (
+        should_upgrade
+        or selected_quote.carrier != "Standard Shipping"
+    )
+    standard_quote = next(
+        quote for quote in quotes if quote.carrier == "Standard Shipping"
+    )
+    cost_impact_value = round(
+        max(0.0, selected_quote.estimated_cost - standard_quote.estimated_cost),
+        2,
+    )
     
     # Ensure ROI analysis is meaningful
     roi = result.get("roi_analysis", "")
     if not roi or len(roi) < 10:
         if should_upgrade:
             roi = (
-                f"Upgrade cost R${cost_impact_value:.0f} justified by risk reduction. "
-                f"Risk level {risk['risk_level']} ({risk['risk_score']}/100) requires faster carrier "
-                f"to meet {scenario.promised_days}-day promise."
+                f"Verified upgrade cost impact is R${cost_impact_value:.2f}. "
+                f"The selected quote estimates {selected_quote.estimated_transit_days:.1f} "
+                f"transit days. Financial return cannot be fully quantified without "
+                f"validated penalty and churn-cost data."
             )
         else:
-            roi = "Standard carrier sufficient — no upgrade cost needed for current risk level."
+            roi = (
+                "The lowest-cost available quote meets the current requirements; "
+                "no incremental carrier cost is required."
+            )
     
     # Ensure upgrade_rationale is meaningful
     rationale = result.get("upgrade_rationale", "")
     if not rationale or len(rationale) < 10:
         if should_upgrade:
             rationale = (
-                f"Risk level {risk['risk_level']} with {scenario.distance_km}km distance "
-                f"requires carrier upgrade to ensure delivery within {scenario.promised_days} days."
+                f"Risk level {risk['risk_level']} and the delivery window justify "
+                f"the verified {selected_quote.carrier} quote."
             )
         else:
             rationale = "Current carrier meets delivery requirements at optimal cost."
-    
+
     return {
-        "recommended_carrier": result.get("recommended_carrier", "Premium Express"),
-        "current_carrier": result.get("current_carrier", "Standard Shipping"),
+        "recommended_carrier": selected_quote.carrier,
+        "current_carrier": "Standard Shipping",
         "should_upgrade": should_upgrade,
         "upgrade_rationale": rationale,
         "cost_impact": cost_impact_value,
-        "roi_analysis": roi
+        "roi_analysis": roi,
+        "estimated_cost": selected_quote.estimated_cost,
+        "estimated_transit_days": selected_quote.estimated_transit_days,
+        "quote_source": selected_quote.source,
     }
 
 
@@ -697,14 +753,13 @@ def run_multi_agent_analysis_parallel(scenario: DeliveryScenario) -> IntegratedD
 
 # Test if Ollama is available
 def check_ollama_status() -> bool:
-    """Check if GitHub Models endpoint is reachable (kept name for compatibility).
-    
-    NOTE: On startup, we don't block waiting for API checks - just return False
-    to avoid delaying server startup. Real LLM checks happen during requests.
+    """Return whether GitHub Models is configured (legacy compatibility name).
+
+    This is intentionally a local readiness check. Network reachability is
+    verified by the authenticated debug probe or a real analysis request.
     """
-    # Don't perform actual LLM check on startup - it blocks the server
-    # The system handles LLM unavailability gracefully during requests
-    return False  # Assume not available on startup, will retry on first request
+    token = os.getenv("GITHUB_TOKEN", "").strip()
+    return bool(token) and len(token) > 10
 
 
 if __name__ == "__main__":

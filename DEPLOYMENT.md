@@ -1,282 +1,167 @@
-# AgenticAI Logistics System - Deployment Guide
+# CI/CD deployment to the existing Azure VM
 
-Multi-agent logistics system powered by GitHub Models API, Pydantic, and Docker.
+The application runs as a Docker Compose stack on the Linux VM `AgenticAI`.
+nginx and Let's Encrypt remain on the VM and proxy public HTTPS traffic to
+`127.0.0.1:8000`. No Azure Container Registry or additional Azure service is
+required.
 
-## 🚀 Quick Deploy (Choose Your Path)
+## Delivery flow
 
-### 1️⃣ **Quick Start** (~5 minutes)
-For immediate AWS deployment:
-→ Read: **[QUICK_START_AWS.md](QUICK_START_AWS.md)**
+1. Every pull request and push runs dependency checks, compilation, linting,
+   unit/integration tests, PostgreSQL migrations, Redis connectivity, and a
+   complete Docker build.
+2. After a successful push to `main`, GitHub Actions creates a release archive
+   directly from the tested Git commit.
+3. The archive is copied to the existing VM through SSH.
+4. The VM builds `agentic-logistics:<git-sha>` locally and updates Docker
+   Compose.
+5. The deployment polls `/health` for up to 90 seconds.
+6. If the new release fails, Docker Compose returns to the previously recorded
+   image and release definition.
 
-### 2️⃣ **Detailed Guide** (~20 minutes)
-For step-by-step AWS setup:
-→ Read: **[AWS_DEPLOYMENT.md](AWS_DEPLOYMENT.md)**
+Manual execution through `workflow_dispatch` is also allowed for `main`.
 
-### 3️⃣ **Local Testing** (~10 minutes)
-For local Docker testing before AWS:
-→ Read: **[BUILD_INSTRUCTIONS.md](BUILD_INSTRUCTIONS.md)**
+## Repository files
 
----
+- `.github/workflows/ci.yml` — CI and production deployment
+- `deploy/docker-compose.production.yml` — production stack
+- `deploy/deploy_azure_vm.sh` — release, health-check, and rollback logic
 
-## 📋 What's Inside
+## Required GitHub configuration
 
-```
-AgenticAI/
-├── app.py                      # Main interactive CLI
-├── pydantic_agents.py          # 4-agent orchestration system
-├── scenarios_examples.py       # 3 test scenarios (HIGH/LOW/MODERATE risk)
-├── prompt_engineering.py       # Optimized prompts + ResponseGrader
-├── chroma_db_manager.py        # Vector DB (optional, for RAG)
-│
-├── Dockerfile                  # Multi-stage build (600-700MB)
-├── docker-compose.yml          # Local testing config
-├── requirements.txt            # Essential deps only
-├── run.sh                       # Container entry point
-│
-├── BUILD_INSTRUCTIONS.md       # Local Docker build guide
-├── AWS_DEPLOYMENT.md           # Detailed AWS setup
-├── QUICK_START_AWS.md          # 5-minute quick deploy
-├── pre_deploy_check.py         # Pre-deployment validation
-│
-├── logistics_docs/             # Knowledge base (weight, distance rules)
-└── .env.example                # Config template
-```
+Create the GitHub environment `production`. A required reviewer is optional but
+recommended for a portfolio production deployment.
 
----
+Add these repository or `production` environment secrets:
 
-## 🎯 System Architecture
+- `AZURE_VM_HOST` — public IP or DNS name of the VM;
+- `AZURE_VM_USER` — Linux user used by the existing SSH connection;
+- `AZURE_VM_SSH_KEY` — private key dedicated to deployment;
+- `AZURE_VM_KNOWN_HOSTS` — verified SSH host-key entry for the VM.
 
-```
-User Input
-    ↓
-Interactive CLI (app.py)
-    ↓
-Multi-Agent Orchestration (pydantic_agents.py)
-    ├─ Risk Assessment Agent    (LLM scoring)
-    ├─ Carrier Optimization     (shipping decision)
-    ├─ Recovery Strategy        (customer retention)
-    └─ Decision Integrator      (final recommendation)
-    ↓
-Response Grading (prompt_engineering.py)
-    ├─ Score alignment (0-100)
-    ├─ Logic validation
-    └─ Specificity checks
-    ↓
-Output (formatted results)
-```
+Optional GitHub Actions variables:
 
----
+- `AZURE_VM_SSH_PORT` — defaults to `22`;
+- `AZURE_DEPLOYMENT_PATH` — for the existing VM use
+  `/home/azureuser/Agentic-Logistics-Optimizer`; otherwise it defaults to
+  `$HOME/agentic-logistics`.
 
-## 💡 Features
+The Azure Resource Group name is not needed by this simpler workflow.
 
-| Feature | Status |
-|---------|--------|
-| **Multi-agent system** | ✅ 4 agents (parallel execution) |
-| **GitHub Models API** | ✅ gpt-4o-mini (free tier) |
-| **Response grading** | ✅ 0-100 scale with deductions |
-| **Test scenarios** | ✅ 3 scenarios (HIGH/LOW/MODERATE) |
-| **Docker deployment** | ✅ 1GB RAM optimized |
-| **AWS compatible** | ✅ t3.micro free tier |
-| **FastAPI API** | ⏳ Coming soon |
-| **Redis caching** | ⏳ Optional (disabled for t3.micro) |
+### Obtain the known-hosts entry
 
----
+Run this from a trusted computer and compare the fingerprint with the VM before
+adding the complete output as `AZURE_VM_KNOWN_HOSTS`:
 
-## 📊 Performance
-
-| Metric | Value |
-|--------|-------|
-| **Analysis time** | ~10-20 seconds per scenario |
-| **Docker image** | ~600-700 MB |
-| **Memory usage** | ~300-400 MB baseline |
-| **Free RAM (t3.micro)** | ~600 MB available ✓ |
-| **API calls** | GitHub Models (50/day free) |
-| **AWS cost** | **$0/month** (free tier) |
-
----
-
-## 🔐 Security
-
-- ✅ Non-root user in container
-- ✅ .env for secrets (not in image)
-- ✅ Read-only logistics_docs volume
-- ✅ HTTPS for GitHub Models API
-- ✅ No hardcoded credentials
-
----
-
-## 📚 Test It Locally First
-
-### 1. Setup
 ```bash
-cp .env.example .env
-# Edit .env, add GITHUB_TOKEN
-nano .env
+ssh-keyscan -p 22 <vm-ip-or-dns>
 ```
 
-### 2. Build
+Do not use `StrictHostKeyChecking=no`. Keeping a verified host key in GitHub
+prevents the workflow from silently connecting to an impersonated server.
+
+## VM prerequisites
+
+The existing VM user must be able to connect through SSH and run Docker without
+an interactive password. The VM also needs:
+
+- Docker Engine;
+- Docker Compose v2 (`docker compose`);
+- curl;
+- tar;
+- nginx forwarding to `http://127.0.0.1:8000`.
+
+The workflow does not modify nginx, firewall rules, or Azure resources.
+
+## Production environment file
+
+The existing VM already uses
+`/home/azureuser/Agentic-Logistics-Optimizer/.env`; the deployment reuses it and
+never sends its contents to GitHub Actions. For a new VM, create the file once:
+
 ```bash
-docker build -t agentic-ai-logistics:latest .
+mkdir -p "$HOME/agentic-logistics"
+nano "$HOME/agentic-logistics/.env"
+chmod 600 "$HOME/agentic-logistics/.env"
 ```
 
-### 3. Run
-```bash
-docker-compose up
-```
+Minimum configuration:
 
-### 4. Test Scenarios
-```bash
-docker exec -it agentic-ai-logistics python app.py
-# Select option 2 (all scenarios)
-```
+```dotenv
+ENVIRONMENT=production
+POSTGRES_USER=agentic_user
+POSTGRES_PASSWORD=<strong-database-password>
+POSTGRES_DB=logistics_app
 
----
-
-## 🚀 Deploy to AWS
-
-### Minimum Requirements
-- AWS Account (free tier eligible)
-- EC2 t3.micro (750 hrs free/month)
-- 20GB storage (30GB free)
-- GitHub Personal Access Token
-
-### Steps
-1. Read **QUICK_START_AWS.md** (5 min)
-2. Create EC2 instance (Ubuntu 24.04)
-3. SSH into instance
-4. Run deployment script
-5. Done! ✅
-
----
-
-## 🧪 Validate Setup
-
-Before deployment, run:
-```bash
-python pre_deploy_check.py
-```
-
-Output:
-```
-✅ Dockerfile: Dockerfile
-✅ requirements.txt: requirements.txt
-✅ GITHUB_TOKEN: ghp_XXXXXXXXX...
-✅ All checks passed! Ready for deployment!
-```
-
----
-
-## 📝 Configuration
-
-### Environment Variables (.env)
-```env
-GITHUB_TOKEN=ghp_your_token_here
+GITHUB_TOKEN=<github-models-token>
 GITHUB_MODELS_BASE_URL=https://models.inference.ai.azure.com
 GITHUB_MODEL=gpt-4o-mini
-LLM_TEMPERATURE=0.7
+
+API_KEY=<random-api-key>
+PORTFOLIO_PASSWORD=<portfolio-password>
+CORS_ORIGINS=https://gwprojects.switzerlandnorth.cloudapp.azure.com
+
+LLM_TEMPERATURE=0.3
 LLM_TOP_P=0.9
-LLM_MAX_TOKENS=1000
-REDIS_ENABLED=false
+LLM_MAX_TOKENS=1024
+LLM_REQUEST_TIMEOUT_SECONDS=20
+ANALYSIS_TIMEOUT_SECONDS=75
+HEALTH_CHECK_TIMEOUT_SECONDS=2
 ```
 
-### Optimization for t3.micro
-- ✅ Redis disabled (saves 100+ MB)
-- ✅ Python 3.11-slim (minimal image)
-- ✅ Single worker process
-- ✅ Request timeouts configured
-- ✅ Memory limits set
+The deployment never uploads, replaces, or prints this file. Production Compose
+constructs `DATABASE_URL` from the three PostgreSQL variables, matching the
+existing deployment.
 
----
+## Release layout on the VM
 
-## 🆘 Troubleshooting
+```text
+/home/azureuser/Agentic-Logistics-Optimizer/
+├── .env                  # production secrets
+├── .deployed-image       # last healthy Docker image
+├── .deployed-release     # last healthy release directory
+├── current -> releases/… # symlink to the active source revision
+├── chroma_db/            # persistent vector data
+└── releases/
+    └── <git-sha>/        # immutable source used to build the image
+```
 
-### Docker build fails
+PostgreSQL and Redis use persistent named Docker volumes. Releases never delete
+those volumes or the ChromaDB directory.
+
+## Existing deployment
+
+Before the first automated deployment, inspect the currently running Compose
+project and its volumes. This VM uses the fixed project name
+`agentic-logistics-optimizer`. The new pipeline keeps that project name, the
+existing container names, PostgreSQL/Redis volumes, `.env`, and ChromaDB
+directory. On its first run it also records the current image and Compose file,
+so a failed release can return to the manually deployed version. A database
+backup before the first cutover is still prudent.
+
+## Operations
+
+Show the active release:
+
 ```bash
-docker build --no-cache -t agentic-ai-logistics:latest .
+cat "$HOME/Agentic-Logistics-Optimizer/.deployed-image"
+readlink -f "$HOME/Agentic-Logistics-Optimizer/current"
 ```
 
-### Container won't start
+Show containers:
+
 ```bash
-docker logs agentic-app
-docker inspect agentic-app
+cd "$HOME/Agentic-Logistics-Optimizer/current/deploy"
+IMAGE_REF="$(cat ../../.deployed-image)" \
+CHROMA_DATA_PATH="$HOME/Agentic-Logistics-Optimizer/chroma_db" \
+docker compose --project-name agentic-logistics-optimizer \
+  --env-file ../../.env \
+  --file docker-compose.production.yml \
+  ps
 ```
 
-### GitHub Models API connection failed
+Application logs use the same command prefix followed by:
+
 ```bash
-# Check token
-docker exec agentic-app python -c "import os; print(os.getenv('GITHUB_TOKEN'))"
-
-# Test endpoint
-docker exec agentic-app curl -I https://models.inference.ai.azure.com
+logs --tail 200 app
 ```
-
-### Out of memory (EC2)
-```bash
-# Add swap
-sudo fallocate -l 1G /swapfile
-sudo chmod 600 /swapfile
-sudo mkswap /swapfile
-sudo swapon /swapfile
-```
-
----
-
-## 📖 Documentation
-
-| File | Purpose |
-|------|---------|
-| **QUICK_START_AWS.md** | 5-minute quick deploy |
-| **AWS_DEPLOYMENT.md** | Detailed step-by-step guide |
-| **BUILD_INSTRUCTIONS.md** | Local Docker build |
-| **pre_deploy_check.py** | Validation script |
-| **README.md** | This file (overview) |
-
----
-
-## 🎓 Learning Resources
-
-### Prompt Engineering
-See: `prompt_engineering.py` → RISK_AGENT_PROMPT_V2, CARRIER_AGENT_PROMPT_V2, RECOVERY_AGENT_PROMPT_V2
-
-Optimizations:
-- ✅ Structured JSON output
-- ✅ Numerical scoring logic
-- ✅ Clear decision criteria
-- ✅ Quantified metrics (ROI, retention %)
-
-### Response Grading
-See: `prompt_engineering.py` → ResponseGrader class
-
-Scoring dimensions:
-- Structure (20-25 pts): Required fields present
-- Logic (20-25 pts): Values align with rules
-- Specificity (20 pts): Concrete measurements
-- Depth (15-20 pts): Detailed analysis
-
----
-
-## 🔄 CI/CD Pipeline (Optional)
-
-Future: GitHub Actions to:
-1. Build Docker image
-2. Run tests
-3. Push to ECR
-4. Deploy to EC2
-
----
-
-## 📞 Support
-
-- **Local issues**: See BUILD_INSTRUCTIONS.md
-- **AWS issues**: See AWS_DEPLOYMENT.md
-- **Quick help**: See QUICK_START_AWS.md
-
----
-
-## 📄 License
-
-This project uses GitHub Models API (free tier, 50 calls/day).
-
----
-
-**Ready to deploy? Start here:** [QUICK_START_AWS.md](QUICK_START_AWS.md) 🚀

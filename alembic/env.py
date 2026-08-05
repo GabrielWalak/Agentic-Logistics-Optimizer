@@ -2,9 +2,11 @@
 # This script tracks all database schema changes
 
 import os
+import asyncio
 import logging
 from logging.config import fileConfig
-from sqlalchemy import engine_from_config, pool
+from sqlalchemy import pool
+from sqlalchemy.ext.asyncio import async_engine_from_config
 from alembic import context
 from sqlmodel import SQLModel
 
@@ -44,24 +46,36 @@ def run_migrations_offline() -> None:
         context.run_migrations()
 
 
-def run_migrations_online() -> None:
-    """Run migrations in 'online' mode"""
+def do_run_migrations(connection) -> None:
+    """Run synchronous Alembic operations on an async connection bridge."""
+    context.configure(connection=connection, target_metadata=target_metadata)
+
+    with context.begin_transaction():
+        context.run_migrations()
+
+
+async def run_async_migrations() -> None:
+    """Create the asyncpg engine expected by the application's database URL."""
     url = DATABASE_URL
-    
+
     configuration = config.get_section(config.config_ini_section)
     configuration["sqlalchemy.url"] = url
 
-    connectable = engine_from_config(
+    connectable = async_engine_from_config(
         configuration,
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
     )
 
-    with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata)
+    async with connectable.connect() as connection:
+        await connection.run_sync(do_run_migrations)
 
-        with context.begin_transaction():
-            context.run_migrations()
+    await connectable.dispose()
+
+
+def run_migrations_online() -> None:
+    """Run migrations in online mode with the asyncpg driver."""
+    asyncio.run(run_async_migrations())
 
 
 if context.is_offline_mode():

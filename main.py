@@ -1,8 +1,4 @@
-"""
-Agentic Logistics API - FastAPI + PostgreSQL + Redis
-Production-grade multi-agent system for logistics decision-making
-DigitalOcean deployment ready
-"""
+"""FastAPI entry point for the multi-agent logistics portfolio project."""
 
 import os
 import json
@@ -18,7 +14,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request, Depends, Security
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 from fastapi.security import APIKeyHeader
 from fastapi.openapi.utils import get_openapi
 from pydantic import BaseModel, Field, ConfigDict
@@ -29,13 +25,13 @@ from pydantic_agents import (
     DeliveryScenario,
     IntegratedDecision,
     run_multi_agent_analysis_parallel,
-    check_ollama_status,
     LLMError,
+    rag_cache,
 )
 from prompt_engineering import ResponseGrader
 from ml_predictor import predict_delivery_days, get_model_info
 from models import AuditLog
-from database import get_session, init_db
+from database import check_database_health, get_session, init_db
 
 
 # ===== CONFIGURATION =====
@@ -46,6 +42,9 @@ CORS_ORIGINS = os.getenv("CORS_ORIGINS", "*").split(",")
 LOG_LEVEL = os.getenv("LOG_LEVEL", "info").lower()
 SERVICE_NAME = "agentic-logistics-api"
 API_VERSION = "1.0.0"
+DEFAULT_RAG_CONTEXT = "Standard carrier rules apply"
+ANALYSIS_TIMEOUT_SECONDS = float(os.getenv("ANALYSIS_TIMEOUT_SECONDS", "75"))
+HEALTH_CHECK_TIMEOUT_SECONDS = float(os.getenv("HEALTH_CHECK_TIMEOUT_SECONDS", "2"))
 
 
 # ===== LOGGING =====
@@ -116,7 +115,7 @@ class AnalysisRequest(BaseModel):
     freight_value: float = Field(description="Freight cost in USD")
     payment_lag_days: int = Field(default=2, description="Payment lag in days")
     is_weekend_order: int = Field(default=0, description="Weekend order flag")
-    rag_context: str = Field(default="Standard carrier rules apply", description="RAG context (auto-retrieved if not provided)")
+    rag_context: str = Field(default=DEFAULT_RAG_CONTEXT, description="RAG context (auto-retrieved if not provided)")
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -160,6 +159,8 @@ class HealthResponse(BaseModel):
     service_name: str
     llm_ready: bool
     cache_enabled: bool
+    database_ready: bool
+    ml_model_ready: bool
     environment: str
 
 
@@ -202,6 +203,93 @@ def get_request_id() -> str:
     return str(uuid.uuid4())
 
 
+def _prepare_analysis_scenario(request_body: AnalysisRequest) -> DeliveryScenario:
+    """Resolve optional ML and RAG inputs into one validated scenario.
+
+    This synchronous preparation is shared by single and batch endpoints and is
+    executed in a worker thread by callers. Keeping it in one place prevents
+    the two API paths from silently applying different business rules.
+    """
+
+    predicted_days = request_body.predicted_days
+    if predicted_days is None or predicted_days <= 0:
+        predicted_days = predict_delivery_days(
+            distance_km=request_body.distance_km,
+            weight_g=request_body.weight_g,
+            freight_value=request_body.freight_value,
+            payment_lag_days=request_body.payment_lag_days,
+            is_weekend_order=request_body.is_weekend_order,
+        )
+    if predicted_days is None:
+        predicted_days = 7.0
+
+    rag_context = request_body.rag_context
+    if rag_context == DEFAULT_RAG_CONTEXT:
+        rag_context = _get_rag_context(
+            distance_km=request_body.distance_km,
+            weight_g=request_body.weight_g,
+            payment_lag_days=request_body.payment_lag_days,
+            is_weekend_order=request_body.is_weekend_order,
+            predicted_days=predicted_days,
+            promised_days=request_body.promised_days,
+        )
+
+    return DeliveryScenario(
+        predicted_days=predicted_days,
+        promised_days=request_body.promised_days,
+        distance_km=request_body.distance_km,
+        weight_g=request_body.weight_g,
+        payment_lag_days=request_body.payment_lag_days,
+        is_weekend_order=request_body.is_weekend_order,
+        freight_value=request_body.freight_value,
+        rag_context=rag_context,
+    )
+
+
+async def _run_analysis_with_timeout(
+    scenario: DeliveryScenario,
+) -> IntegratedDecision:
+    """Run the blocking agent workflow without blocking the FastAPI event loop."""
+
+    return await asyncio.wait_for(
+        asyncio.to_thread(run_multi_agent_analysis_parallel, scenario),
+        timeout=ANALYSIS_TIMEOUT_SECONDS,
+    )
+
+
+def _grade_decision(decision: IntegratedDecision) -> GradingResult:
+    """Apply the deterministic quality rubric to normalized agent outputs."""
+
+    grader = ResponseGrader()
+    risk_score, risk_details = grader.grade_risk_assessment(
+        json.dumps(decision.risk_assessment.model_dump())
+    )
+    carrier_score, carrier_details = grader.grade_carrier_recommendation(
+        json.dumps(decision.carrier_recommendation.model_dump())
+    )
+    recovery_score, recovery_details = grader.grade_recovery_plan(
+        json.dumps(decision.recovery_plan.model_dump())
+    )
+
+    overall_score = round((risk_score + carrier_score + recovery_score) / 3, 1)
+    if overall_score >= 85:
+        quality_level = "Excellent"
+    elif overall_score >= 70:
+        quality_level = "Good"
+    elif overall_score >= 50:
+        quality_level = "Fair"
+    else:
+        quality_level = "Poor"
+
+    return GradingResult(
+        overall_score=overall_score,
+        quality_level=quality_level,
+        risk_grading={"score": risk_score, "details": risk_details},
+        carrier_grading={"score": carrier_score, "details": carrier_details},
+        recovery_grading={"score": recovery_score, "details": recovery_details},
+    )
+
+
 # ===== BASIC AUTH FOR PORTFOLIO ACCESS =====
 
 PORTFOLIO_PASSWORD = os.getenv("PORTFOLIO_PASSWORD", "portfolio2026")
@@ -222,9 +310,8 @@ def check_basic_auth(request: Request) -> Optional[str]:
         return None
 
 
-def require_auth_response():
+def require_auth_response() -> Response:
     """Return 401 with WWW-Authenticate header to trigger browser login popup."""
-    from starlette.responses import Response
     return Response(
         content="Authentication required. Use any username with the portfolio password.",
         status_code=401,
@@ -239,11 +326,38 @@ from templates import build_home_page
 # ===== APPLICATION INSTANCE & STATE =====
 
 app_state = AppState()
-DEMO_ANALYSIS_PAYLOAD: Dict[str, Any] = {}
+DEMO_ANALYSIS_PAYLOAD: Dict[str, Any] = {
+    "risk_assessment": {
+        "risk_level": "MODERATE",
+        "risk_score": 65.0,
+        "primary_risk_factors": [
+            "Predicted delivery versus promised window",
+            "Distance",
+            "Weight",
+            "Payment lag",
+        ],
+    },
+    "carrier_recommendation": {
+        "recommended_carrier": "Regional",
+        "should_upgrade": True,
+        "cost_impact": 15.0,
+    },
+    "recovery_plan": {
+        "voucher_code": "DELAY25",
+        "discount_percentage": 25.0,
+        "retention_probability": 75.0,
+    },
+    "executive_summary": (
+        "The delivery is slightly late, so we recommend a regional carrier "
+        "upgrade and a DELAY25 voucher to reduce risk and protect retention."
+    ),
+    "estimated_delivery_time": 7.0,
+    "confidence_score": 78.0,
+}
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(application: FastAPI):
     """Application lifecycle management"""
     logger.info("Starting API server", version=API_VERSION, environment=ENVIRONMENT)
 
@@ -251,54 +365,10 @@ async def lifespan(app: FastAPI):
     try:
         await init_db()
         logger.info("Database initialized successfully")
-        app.db_ready = True
+        application.state.db_ready = True
     except Exception as e:
         logger.warning("Database initialization failed (running in demo mode)", error=str(e))
-        app.db_ready = False
-
-    # Check LLM availability
-    llm_ready = check_ollama_status()
-    app.llm_ready = llm_ready
-    logger.info("LLM status check", llm_ready=llm_ready)
-
-    # Precompute demo analysis
-    global DEMO_ANALYSIS_PAYLOAD
-    try:
-        demo_scenario = DeliveryScenario(
-            predicted_days=8.5,
-            promised_days=7.0,
-            distance_km=450,
-            weight_g=1200,
-            payment_lag_days=2,
-            is_weekend_order=0,
-            freight_value=45.0,
-            rag_context="Standard carrier rules apply",
-        )
-        await asyncio.to_thread(run_multi_agent_analysis_parallel, demo_scenario)
-
-        DEMO_ANALYSIS_PAYLOAD = {
-            "risk_assessment": {
-                "risk_level": "MODERATE",
-                "risk_score": 65.0,
-                "primary_risk_factors": ["Predicted Delivery vs. Promised Window", "Distance", "Weight", "Payment Lag"],
-            },
-            "carrier_recommendation": {
-                "recommended_carrier": "Regional",
-                "should_upgrade": True,
-                "cost_impact": 15.0,
-            },
-            "recovery_plan": {
-                "voucher_code": "DELAY25",
-                "discount_percentage": 25.0,
-                "retention_probability": 75.0,
-            },
-            "executive_summary": "The delivery is slightly late, so we recommend a regional carrier upgrade and a DELAY25 voucher to reduce risk and protect retention.",
-            "estimated_delivery_time": 7.0,
-            "confidence_score": 78.0,
-        }
-        logger.info("Demo analysis precomputed", confidence_score=78)
-    except Exception as e:
-        logger.warning("Demo analysis precomputation failed (non-fatal)", error=str(e))
+        application.state.db_ready = False
 
     yield
 
@@ -314,10 +384,15 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Agentic Logistics Optimizer API",
-    description="Enterprise-grade multi-agent system for logistics decision-making",
+    description="Portfolio multi-agent workflow for logistics decision support",
     version=API_VERSION,
     lifespan=lifespan,
 )
+
+# FastAPI exposes ``app.state`` specifically for application-scoped runtime
+# data. Initializing the flag here also makes the state deterministic when a
+# test client is created without entering the lifespan context.
+app.state.db_ready = False
 
 
 def custom_openapi() -> Dict[str, Any]:
@@ -360,7 +435,7 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 # ===== ROUTE HANDLERS =====
 
 @app.get("/", tags=["Info"])
-async def root(request: Request) -> HTMLResponse:
+async def root(request: Request) -> Response:
     """Home page with portfolio showcase — requires Basic Auth password"""
     # Check Basic Auth
     user = check_basic_auth(request)
@@ -380,18 +455,43 @@ async def root(request: Request) -> HTMLResponse:
 
 @app.get("/health", response_model=HealthResponse, tags=["Monitoring"])
 async def health_check() -> HealthResponse:
-    """Health check endpoint with LLM token validation"""
-    # Quick token presence check (not a full API call)
+    """Report component readiness without making a paid LLM request."""
+
     token = os.getenv("GITHUB_TOKEN", "").strip()
     llm_ready = bool(token) and len(token) > 10
 
+    try:
+        database_ready = await asyncio.wait_for(
+            check_database_health(),
+            timeout=HEALTH_CHECK_TIMEOUT_SECONDS,
+        )
+    except asyncio.TimeoutError:
+        database_ready = False
+
+    # Keep audit-log readiness aligned with the live database probe. This also
+    # allows the application to recover automatically when PostgreSQL becomes
+    # available after a degraded startup.
+    app.state.db_ready = database_ready
+
+    cache_enabled, model_info = await asyncio.gather(
+        asyncio.to_thread(rag_cache.is_healthy),
+        asyncio.to_thread(get_model_info),
+    )
+    ml_model_ready = bool(model_info.get("model_available"))
+
+    required_components_ready = all(
+        (llm_ready, database_ready, ml_model_ready)
+    )
+
     return HealthResponse(
-        status="healthy",
+        status="healthy" if required_components_ready else "degraded",
         timestamp=datetime.now(timezone.utc).isoformat(),
         version=API_VERSION,
         service_name=SERVICE_NAME,
         llm_ready=llm_ready,
-        cache_enabled=True,
+        cache_enabled=cache_enabled,
+        database_ready=database_ready,
+        ml_model_ready=ml_model_ready,
         environment=ENVIRONMENT,
     )
 
@@ -422,77 +522,18 @@ async def analyze_delivery(
     start_time = time.perf_counter()
 
     try:
-        # Auto-predict delivery days if not provided or use ML model
-        predicted_days = request_body.predicted_days
-        if predicted_days is None or predicted_days <= 0:
-            ml_prediction = predict_delivery_days(
-                distance_km=request_body.distance_km,
-                weight_g=request_body.weight_g,
-                freight_value=request_body.freight_value,
-                payment_lag_days=request_body.payment_lag_days,
-                is_weekend_order=request_body.is_weekend_order,
-            )
-            if ml_prediction is not None:
-                predicted_days = ml_prediction
-            else:
-                predicted_days = 7.0  # Safe default
-
-        # Auto-retrieve RAG context if not provided
-        rag_context = request_body.rag_context
-        if rag_context == "Standard carrier rules apply":
-            rag_context = _get_rag_context(
-                distance_km=request_body.distance_km,
-                weight_g=request_body.weight_g,
-                payment_lag_days=request_body.payment_lag_days,
-                is_weekend_order=request_body.is_weekend_order,
-                predicted_days=predicted_days,
-                promised_days=request_body.promised_days,
-            )
-
-        scenario = DeliveryScenario(
-            predicted_days=predicted_days,
-            promised_days=request_body.promised_days,
-            distance_km=request_body.distance_km,
-            weight_g=request_body.weight_g,
-            payment_lag_days=request_body.payment_lag_days,
-            is_weekend_order=request_body.is_weekend_order,
-            freight_value=request_body.freight_value,
-            rag_context=rag_context,
+        # ML prediction and vector retrieval are synchronous operations. Running
+        # preparation in a worker keeps concurrent HTTP requests responsive.
+        scenario = await asyncio.to_thread(
+            _prepare_analysis_scenario,
+            request_body,
         )
-
-        decision = await asyncio.to_thread(run_multi_agent_analysis_parallel, scenario)
+        decision = await _run_analysis_with_timeout(scenario)
+        grading = _grade_decision(decision)
         processing_time_ms = (time.perf_counter() - start_time) * 1000
 
-        # Grade the agent responses
-        grader = ResponseGrader()
-        risk_json = json.dumps(decision.risk_assessment.model_dump())
-        carrier_json = json.dumps(decision.carrier_recommendation.model_dump())
-        recovery_json = json.dumps(decision.recovery_plan.model_dump())
-
-        risk_score, risk_details = grader.grade_risk_assessment(risk_json)
-        carrier_score, carrier_details = grader.grade_carrier_recommendation(carrier_json)
-        recovery_score, recovery_details = grader.grade_recovery_plan(recovery_json)
-
-        overall_score = round((risk_score + carrier_score + recovery_score) / 3, 1)
-        if overall_score >= 85:
-            quality_level = "Excellent"
-        elif overall_score >= 70:
-            quality_level = "Good"
-        elif overall_score >= 50:
-            quality_level = "Fair"
-        else:
-            quality_level = "Poor"
-
-        grading = GradingResult(
-            overall_score=overall_score,
-            quality_level=quality_level,
-            risk_grading={"score": risk_score, "details": risk_details},
-            carrier_grading={"score": carrier_score, "details": carrier_details},
-            recovery_grading={"score": recovery_score, "details": recovery_details},
-        )
-
         # Store audit log (if database is ready)
-        if getattr(app, "db_ready", False):
+        if app.state.db_ready:
             try:
                 audit_log = AuditLog(
                     session_id=str(uuid.uuid4()),
@@ -505,6 +546,7 @@ async def analyze_delivery(
                 session.add(audit_log)
                 await session.commit()
             except Exception as e:
+                await session.rollback()
                 logger.warning("Audit log storage failed", error=str(e))
 
         await app_state.increment_request(processing_time_ms, success=True)
@@ -512,7 +554,7 @@ async def analyze_delivery(
             "Analysis completed",
             request_id=request_id,
             processing_time_ms=round(processing_time_ms, 2),
-            grading_score=overall_score,
+            grading_score=grading.overall_score,
         )
 
         return AnalysisResponse(
@@ -521,6 +563,19 @@ async def analyze_delivery(
             grading=grading,
             processing_time_ms=processing_time_ms,
             timestamp=datetime.now(timezone.utc).isoformat(),
+        )
+
+    except asyncio.TimeoutError:
+        processing_time_ms = (time.perf_counter() - start_time) * 1000
+        await app_state.increment_request(processing_time_ms, success=False)
+        logger.error(
+            "Analysis timed out",
+            request_id=request_id,
+            timeout_seconds=ANALYSIS_TIMEOUT_SECONDS,
+        )
+        raise HTTPException(
+            status_code=504,
+            detail="AI analysis exceeded the configured time limit",
         )
 
     except LLMError as e:
@@ -542,7 +597,6 @@ async def analyze_delivery(
 @app.post("/batch-analyze", tags=["Analysis"])
 async def batch_analyze(
     requests: List[AnalysisRequest],
-    session: AsyncSession = Depends(get_session),
     request_id: str = Depends(get_request_id),
     _: bool = Depends(rate_limit_check),
     __: str = Depends(verify_api_key),
@@ -556,29 +610,39 @@ async def batch_analyze(
     successful = 0
 
     try:
-        for req in requests:
+        for index, req in enumerate(requests):
             try:
-                scenario = DeliveryScenario(
-                    predicted_days=req.predicted_days,
-                    promised_days=req.promised_days,
-                    distance_km=req.distance_km,
-                    weight_g=req.weight_g,
-                    payment_lag_days=req.payment_lag_days,
-                    is_weekend_order=req.is_weekend_order,
-                    freight_value=req.freight_value,
-                    rag_context=req.rag_context,
+                scenario = await asyncio.to_thread(
+                    _prepare_analysis_scenario,
+                    req,
                 )
-
-                decision = await asyncio.to_thread(run_multi_agent_analysis_parallel, scenario)
+                decision = await _run_analysis_with_timeout(scenario)
                 results.append(decision.model_dump())
                 successful += 1
 
+            except asyncio.TimeoutError:
+                logger.warning("Batch item timed out", item_index=index)
+                results.append({
+                    "error": "AI analysis exceeded the configured time limit",
+                    "error_type": "timeout",
+                })
             except Exception as e:
-                logger.warning("Batch item failed", error=str(e))
-                results.append({"error": str(e)})
+                logger.warning(
+                    "Batch item failed",
+                    item_index=index,
+                    error=str(e),
+                )
+                results.append({
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                })
 
         processing_time_ms = (time.perf_counter() - start_time) * 1000
-        await app_state.increment_request(processing_time_ms, success=True)
+        all_succeeded = successful == len(requests)
+        await app_state.increment_request(
+            processing_time_ms,
+            success=all_succeeded,
+        )
 
         logger.info(
             "Batch analysis completed",
@@ -590,7 +654,7 @@ async def batch_analyze(
 
         return {
             "request_id": request_id,
-            "status": "completed",
+            "status": "completed" if all_succeeded else "completed_with_errors",
             "total": len(requests),
             "successful": successful,
             "failed": len(requests) - successful,
@@ -635,10 +699,12 @@ def _get_rag_context(
                 "is_weekend_order": is_weekend_order,
             },
         )
-        return context if context else "Standard carrier rules apply"
-    except Exception:
-        # Fallback if ChromaDB not available
-        return "Standard carrier rules apply"
+        return context if context else DEFAULT_RAG_CONTEXT
+    except Exception as exc:
+        # RAG is an enrichment layer. Analysis remains available with an
+        # explicit neutral context, while the failure stays observable in logs.
+        logger.warning("RAG context retrieval failed", error=str(exc))
+        return DEFAULT_RAG_CONTEXT
 
 
 # ===== ML PREDICTION ENDPOINT =====
@@ -659,7 +725,8 @@ async def predict_delivery(request_body: PredictRequest) -> Dict[str, Any]:
     
     Returns predicted days and model metadata.
     """
-    prediction = predict_delivery_days(
+    prediction = await asyncio.to_thread(
+        predict_delivery_days,
         distance_km=request_body.distance_km,
         weight_g=request_body.weight_g,
         freight_value=request_body.freight_value,
@@ -673,7 +740,7 @@ async def predict_delivery(request_body: PredictRequest) -> Dict[str, Any]:
 
     return {
         "predicted_days": prediction,
-        "model_info": get_model_info(),
+        "model_info": await asyncio.to_thread(get_model_info),
     }
 
 
@@ -721,53 +788,49 @@ async def demo_analyze(request_body: DemoRequest) -> Dict[str, Any]:
     start_time = time.perf_counter()
     params = DEMO_SCENARIO_PARAMS[scenario_name]
 
-    # Step 1: ML Model predicts delivery time
-    ml_prediction = predict_delivery_days(
-        distance_km=params["distance_km"],
-        weight_g=params["weight_g"],
-        freight_value=params["freight_value"],
-        payment_lag_days=params["payment_lag_days"],
-        is_weekend_order=params["is_weekend_order"],
-        purchase_month=params.get("purchase_month", 6),
-    )
-    ml_used = ml_prediction is not None
-    predicted_days = ml_prediction if ml_used else params["promised_days"] + 2.0
-
-    # Step 2: RAG retrieval for context
-    rag_context = _get_rag_context(
-        distance_km=params["distance_km"],
-        weight_g=params["weight_g"],
-        payment_lag_days=params["payment_lag_days"],
-        is_weekend_order=params["is_weekend_order"],
-        predicted_days=predicted_days,
-        promised_days=params["promised_days"],
-    )
-
-    # Step 3: Build scenario with ML-predicted days + RAG context
-    scenario = DeliveryScenario(
-        predicted_days=predicted_days,
-        promised_days=params["promised_days"],
-        distance_km=params["distance_km"],
-        weight_g=params["weight_g"],
-        payment_lag_days=params["payment_lag_days"],
-        is_weekend_order=params["is_weekend_order"],
-        freight_value=params["freight_value"],
-        rag_context=rag_context,
-    )
-
     try:
-        # Step 4: Multi-Agent LLM analysis
-        decision = await asyncio.to_thread(run_multi_agent_analysis_parallel, scenario)
+        # The public demo uses fixed inputs, but follows the same ML -> RAG ->
+        # agents sequence as the authenticated endpoint.
+        ml_prediction = await asyncio.to_thread(
+            predict_delivery_days,
+            distance_km=params["distance_km"],
+            weight_g=params["weight_g"],
+            freight_value=params["freight_value"],
+            payment_lag_days=params["payment_lag_days"],
+            is_weekend_order=params["is_weekend_order"],
+            purchase_month=params.get("purchase_month", 6),
+        )
+        ml_used = ml_prediction is not None
+        predicted_days = (
+            ml_prediction
+            if ml_used
+            else params["promised_days"] + 2.0
+        )
+
+        rag_context = await asyncio.to_thread(
+            _get_rag_context,
+            distance_km=params["distance_km"],
+            weight_g=params["weight_g"],
+            payment_lag_days=params["payment_lag_days"],
+            is_weekend_order=params["is_weekend_order"],
+            predicted_days=predicted_days,
+            promised_days=params["promised_days"],
+        )
+
+        scenario = DeliveryScenario(
+            predicted_days=predicted_days,
+            promised_days=params["promised_days"],
+            distance_km=params["distance_km"],
+            weight_g=params["weight_g"],
+            payment_lag_days=params["payment_lag_days"],
+            is_weekend_order=params["is_weekend_order"],
+            freight_value=params["freight_value"],
+            rag_context=rag_context,
+        )
+
+        decision = await _run_analysis_with_timeout(scenario)
+        grading = _grade_decision(decision)
         processing_time_ms = (time.perf_counter() - start_time) * 1000
-
-        # Step 5: Grade responses
-        grader = ResponseGrader()
-        risk_score, risk_details = grader.grade_risk_assessment(json.dumps(decision.risk_assessment.model_dump()))
-        carrier_score, carrier_details = grader.grade_carrier_recommendation(json.dumps(decision.carrier_recommendation.model_dump()))
-        recovery_score, recovery_details = grader.grade_recovery_plan(json.dumps(decision.recovery_plan.model_dump()))
-
-        overall_score = round((risk_score + carrier_score + recovery_score) / 3, 1)
-        quality_level = "Excellent" if overall_score >= 85 else "Good" if overall_score >= 70 else "Fair" if overall_score >= 50 else "Poor"
 
         return {
             "request_id": str(uuid.uuid4()),
@@ -778,17 +841,16 @@ async def demo_analyze(request_body: DemoRequest) -> Dict[str, Any]:
                 "model_type": "XGBoost Regressor (Olist dataset)",
             },
             "decision": decision.model_dump(),
-            "grading": {
-                "overall_score": overall_score,
-                "quality_level": quality_level,
-                "risk_grading": {"score": risk_score, "details": risk_details},
-                "carrier_grading": {"score": carrier_score, "details": carrier_details},
-                "recovery_grading": {"score": recovery_score, "details": recovery_details},
-            },
+            "grading": grading.model_dump(),
             "processing_time_ms": round(processing_time_ms, 2),
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
 
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            status_code=504,
+            detail="AI analysis exceeded the configured time limit",
+        )
     except LLMError as e:
         raise HTTPException(status_code=503, detail=f"AI model unavailable: {str(e)}")
     except Exception as e:
@@ -796,11 +858,10 @@ async def demo_analyze(request_body: DemoRequest) -> Dict[str, Any]:
 
 
 @app.get("/debug/llm-test", tags=["Monitoring"])
-async def debug_llm_test() -> Dict[str, Any]:
-    """Test LLM connectivity — diagnose token/endpoint issues.
-    
-    No auth required so you can quickly check from browser.
-    """
+async def debug_llm_test(
+    _: str = Depends(verify_api_key),
+) -> Dict[str, Any]:
+    """Run an authenticated LLM probe without exposing credential metadata."""
     from pydantic_agents import _get_github_client
 
     token = os.getenv("GITHUB_TOKEN", "").strip()
@@ -809,8 +870,6 @@ async def debug_llm_test() -> Dict[str, Any]:
 
     diagnostics = {
         "token_present": bool(token),
-        "token_length": len(token),
-        "token_prefix": token[:8] + "..." if len(token) > 8 else "(too short)",
         "model": model,
         "base_url": base_url,
         "llm_call_result": None,
@@ -818,21 +877,24 @@ async def debug_llm_test() -> Dict[str, Any]:
     }
 
     if not token or len(token) < 10:
-        diagnostics["error"] = "GITHUB_TOKEN is missing or too short. Set it in .env file."
+        diagnostics["error"] = "GITHUB_TOKEN is missing or invalid."
         return diagnostics
 
     try:
-        client = _get_github_client()
-        response = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "system", "content": "You are a test assistant."},
-                {"role": "user", "content": "Reply with exactly: OK"},
-            ],
-            temperature=0.0,
-            max_tokens=10,
-        )
-        result = response.choices[0].message.content or ""
+        def run_probe() -> str:
+            client = _get_github_client()
+            response = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "system", "content": "You are a test assistant."},
+                    {"role": "user", "content": "Reply with exactly: OK"},
+                ],
+                temperature=0.0,
+                max_tokens=10,
+            )
+            return response.choices[0].message.content or ""
+
+        result = await asyncio.to_thread(run_probe)
         diagnostics["llm_call_result"] = result.strip()
     except Exception as e:
         diagnostics["error"] = f"{type(e).__name__}: {str(e)}"

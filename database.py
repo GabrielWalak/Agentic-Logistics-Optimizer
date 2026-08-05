@@ -6,6 +6,7 @@ Async PostgreSQL with asyncpg driver
 import os
 from typing import AsyncGenerator
 
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 from sqlmodel import SQLModel
@@ -41,6 +42,16 @@ async def init_db():
     """Initialize database tables"""
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
+
+
+async def check_database_health() -> bool:
+    """Execute a lightweight query to verify the current database connection."""
+    try:
+        async with engine.connect() as connection:
+            await connection.execute(text("SELECT 1"))
+        return True
+    except Exception:
+        return False
 
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:

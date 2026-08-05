@@ -1,26 +1,23 @@
-"""
-ChromaDB Manager for OLIST Logistics RAG System
-Enterprise-grade vector database management with Ollama embeddings
-"""
+"""Persistent ChromaDB manager for the local logistics knowledge base."""
 import os
 import chromadb
 from chromadb.config import Settings
 from chromadb.utils import embedding_functions
 from typing import List, Dict, Optional
-from logistics_knowledge_base import LOGISTICS_DOCUMENTS, create_knowledge_base
+from logistics_knowledge_base import LOGISTICS_DOCUMENTS
 
 
 class ChromaDBManager:
     """
     Manages ChromaDB operations for logistics knowledge base
-    Uses Ollama mxbai-embed-large for embeddings (1024-dimensional)
+    Uses ChromaDB's default local embedding function.
     """
     
     def __init__(
         self, 
         persist_directory: str = "./chroma_db",
         collection_name: str = "olist_logistics_knowledge",
-        embedding_model: str = "all-MiniLM-L6-v2"
+        embedding_model: str = "chroma-default"
     ):
         """
         Initialize ChromaDB with persistent storage
@@ -33,6 +30,7 @@ class ChromaDBManager:
         self.persist_directory = persist_directory
         self.collection_name = collection_name
         self.embedding_model = embedding_model
+        self.embedding_function = embedding_functions.DefaultEmbeddingFunction()
         
         # Initialize ChromaDB client with persistent storage
         self.client = chromadb.PersistentClient(
@@ -51,7 +49,8 @@ class ChromaDBManager:
         try:
             # Try to get existing collection
             collection = self.client.get_collection(
-                name=self.collection_name
+                name=self.collection_name,
+                embedding_function=self.embedding_function,
             )
             print(f"✓ Loaded existing collection: {self.collection_name}")
             return collection
@@ -61,7 +60,8 @@ class ChromaDBManager:
             
             collection = self.client.create_collection(
                 name=self.collection_name,
-                metadata={"description": "OLIST Logistics Knowledge Base"}
+                metadata={"description": "OLIST Logistics Knowledge Base"},
+                embedding_function=self.embedding_function,
             )
             return collection
     
@@ -82,9 +82,6 @@ class ChromaDBManager:
             return
         
         print("📚 Indexing knowledge base into ChromaDB...")
-        
-        # Create knowledge base files
-        create_knowledge_base()
         
         documents = []
         metadatas = []
