@@ -271,6 +271,32 @@ class TestBatchAnalyzeEndpoint:
 class TestDemoEndpoint:
     """Test /demo/analyze public endpoint."""
 
+    @patch("main._run_analysis_with_timeout")
+    @patch("main.rag_cache.get")
+    def test_demo_returns_cached_complete_response(
+        self,
+        mock_cache_get,
+        mock_workflow,
+    ):
+        """A repeated fixed scenario should skip ML, RAG, and all agents."""
+        mock_cache_get.return_value = json.dumps(
+            {
+                "scenario": "moderate",
+                "ml_prediction": {"predicted_days": 1.5},
+                "decision": {"confidence_score": 80},
+                "grading": {"overall_score": 82.3},
+                "fallback_used": False,
+                "fallback_reason": None,
+            }
+        )
+
+        response = client.post("/demo/analyze", json={"scenario": "moderate"})
+
+        assert response.status_code == 200
+        assert response.json()["cache_hit"] is True
+        assert response.json()["cache_enabled"] is True
+        mock_workflow.assert_not_called()
+
     @patch("main._get_rag_context", return_value="Test logistics context")
     @patch("pydantic_agents.call_ollama")
     def test_demo_accepts_predefined_scenarios(self, mock_llm, mock_rag):
@@ -285,6 +311,7 @@ class TestDemoEndpoint:
         assert "grading" in data
         assert data["fallback_used"] is False
         assert "cache_enabled" in data
+        assert data["cache_hit"] is False
 
     @patch("main._get_rag_context", return_value="Test logistics context")
     @patch("pydantic_agents.call_ollama")
@@ -303,6 +330,7 @@ class TestDemoEndpoint:
         carrier = data["decision"]["carrier_recommendation"]
         assert data["fallback_used"] is True
         assert "cache_enabled" in data
+        assert data["cache_hit"] is False
         assert data["fallback_reason"] == (
             "LLM provider temporarily unavailable"
         )

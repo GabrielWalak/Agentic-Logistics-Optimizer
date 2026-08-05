@@ -216,7 +216,7 @@ def build_home_page(base_url: str, llm_model: str) -> str:
             const data = await resp.json();
             const elapsedSeconds = (data.processing_time_ms / 1000).toFixed(1);
             const fallbackLabel = data.fallback_used ? ' · deterministic fallback' : '';
-            const cacheLabel = data.cache_enabled ? ' · Redis cache active' : ' · Redis cache unavailable';
+            const cacheLabel = data.cache_hit ? ' · Redis response hit' : data.cache_enabled ? ' · Redis cache active' : ' · Redis cache unavailable';
             statusText.textContent = `Completed in ${{elapsedSeconds}}s${{fallbackLabel}}${{cacheLabel}}`;
             const d = data.decision, g = data.grading, ml = data.ml_prediction;
             const riskGrade = Number(g.risk_grading.score);

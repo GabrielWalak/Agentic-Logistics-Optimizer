@@ -724,7 +724,7 @@ async def predict_delivery(request_body: PredictRequest) -> Dict[str, Any]:
     }
 
 
-# ===== DEMO ENDPOINT (public, rate-limited, predefined scenarios only) =====
+# ===== DEMO ENDPOINT (public, predefined scenarios only) =====
 
 # Demo scenario parameters (without predicted_days — ML model will calculate it)
 DEMO_SCENARIO_PARAMS = {
@@ -744,6 +744,10 @@ DEMO_SCENARIO_PARAMS = {
         "purchase_month": 10,
     },
 }
+
+# Public demo inputs are immutable, so caching the completed response is safe
+# and makes the Redis benefit visible without changing the authenticated API.
+DEMO_RESPONSE_CACHE_VERSION = "v1"
 
 
 class DemoRequest(BaseModel):
@@ -767,6 +771,37 @@ async def demo_analyze(request_body: DemoRequest) -> Dict[str, Any]:
 
     start_time = time.perf_counter()
     params = DEMO_SCENARIO_PARAMS[scenario_name]
+    demo_cache_key = rag_cache.make_key(
+        json.dumps(
+            {
+                "namespace": "portfolio-demo-response",
+                "version": DEMO_RESPONSE_CACHE_VERSION,
+                "scenario": scenario_name,
+                "params": params,
+                "model": get_llm_config()["model"],
+            },
+            sort_keys=True,
+        )
+    )
+
+    cached_response = await asyncio.to_thread(rag_cache.get, demo_cache_key)
+    if cached_response:
+        try:
+            cached_payload = json.loads(cached_response)
+        except json.JSONDecodeError:
+            cached_payload = None
+        if isinstance(cached_payload, dict):
+            return {
+                "request_id": str(uuid.uuid4()),
+                **cached_payload,
+                "cache_enabled": True,
+                "cache_hit": True,
+                "processing_time_ms": round(
+                    (time.perf_counter() - start_time) * 1000,
+                    2,
+                ),
+                "timestamp": datetime.now(timezone.utc).isoformat(),
+            }
 
     try:
         # The public demo uses fixed inputs, but follows the same ML -> RAG ->
@@ -812,8 +847,7 @@ async def demo_analyze(request_body: DemoRequest) -> Dict[str, Any]:
         grading = _grade_decision(decision)
         processing_time_ms = (time.perf_counter() - start_time) * 1000
 
-        return {
-            "request_id": str(uuid.uuid4()),
+        response_payload = {
             "scenario": scenario_name,
             "ml_prediction": {
                 "predicted_days": predicted_days,
@@ -822,9 +856,20 @@ async def demo_analyze(request_body: DemoRequest) -> Dict[str, Any]:
             },
             "decision": decision.model_dump(),
             "grading": grading.model_dump(),
-            "cache_enabled": rag_cache.is_healthy(),
             "fallback_used": False,
             "fallback_reason": None,
+        }
+        await asyncio.to_thread(
+            rag_cache.set,
+            demo_cache_key,
+            json.dumps(response_payload),
+            600,
+        )
+        return {
+            "request_id": str(uuid.uuid4()),
+            **response_payload,
+            "cache_enabled": rag_cache.is_healthy(),
+            "cache_hit": False,
             "processing_time_ms": round(processing_time_ms, 2),
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
@@ -854,6 +899,7 @@ async def demo_analyze(request_body: DemoRequest) -> Dict[str, Any]:
             "decision": decision.model_dump(),
             "grading": grading.model_dump(),
             "cache_enabled": rag_cache.is_healthy(),
+            "cache_hit": False,
             "fallback_used": True,
             "fallback_reason": "LLM provider temporarily unavailable",
             "processing_time_ms": round(processing_time_ms, 2),
