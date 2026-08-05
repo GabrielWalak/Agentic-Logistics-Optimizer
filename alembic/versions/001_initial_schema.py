@@ -47,7 +47,7 @@ def upgrade() -> None:
         sa.Column('endpoint', sa.String(), nullable=False),
         sa.Column('input_data', postgresql.JSON(), nullable=False, server_default='{}'),
         sa.Column('output_data', postgresql.JSON(), nullable=False, server_default='{}'),
-        sa.Column('model_name', sa.String(), nullable=False, server_default='gpt-4o-mini'),
+        sa.Column('model_name', sa.String(), nullable=False, server_default='unknown'),
         sa.Column('tokens_used', sa.Integer(), nullable=False, server_default='0'),
         sa.Column('response_time_ms', sa.Integer(), nullable=False, server_default='0'),
         sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),

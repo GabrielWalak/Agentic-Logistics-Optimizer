@@ -25,7 +25,7 @@ class AuditLog(SQLModel, table=True):
     output_data: Dict[str, Any] = Field(sa_column=Column(JSON), default_factory=dict)
     
     # Metadata
-    model_name: str = "gpt-4o-mini"
+    model_name: str = "unknown"
     tokens_used: int = 0
     response_time_ms: int = 0
     

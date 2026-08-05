@@ -20,7 +20,7 @@ if sys.platform == 'win32':
             pass  # Skip if stdout is already wrapped or unavailable (e.g., pytest)
 
 from pydantic import BaseModel, Field
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Type
 from openai import OpenAI
 from dotenv import load_dotenv
 
@@ -117,23 +117,63 @@ class IntegratedDecision(BaseModel):
     confidence_score: float = Field(default=75.0, description="Overall confidence 0-100")
 
 
-# ===== GITHUB MODELS CLIENT =====
+# These contracts describe only values the LLM is allowed to propose. Verified
+# quote values are deliberately absent because deterministic Python tools own
+# operational price and transit-time data.
+class CarrierAgentOutput(BaseModel):
+    recommended_carrier: str
+    current_carrier: str = "Standard Shipping"
+    should_upgrade: bool
+    upgrade_rationale: str
+    roi_analysis: str
 
-def _get_github_client() -> OpenAI:
-    """Initialize a bounded client for the GitHub Models API.
+
+class OrchestratorOutput(BaseModel):
+    executive_summary: str
+    estimated_delivery_time: float
+    confidence_score: float
+
+
+# ===== PROVIDER-NEUTRAL LLM CLIENT =====
+
+def get_llm_config() -> Dict[str, str]:
+    """Resolve provider-neutral settings with temporary legacy compatibility."""
+    return {
+        "api_key": (
+            os.getenv("LLM_API_KEY", "").strip()
+            or os.getenv("GEMINI_API_KEY", "").strip()
+            or os.getenv("GITHUB_TOKEN", "").strip()
+        ),
+        "base_url": (
+            os.getenv("LLM_BASE_URL", "").strip()
+            or os.getenv("GITHUB_MODELS_BASE_URL", "").strip()
+            or "https://generativelanguage.googleapis.com/v1beta/openai/"
+        ),
+        "model": (
+            os.getenv("LLM_MODEL", "").strip()
+            or os.getenv("GITHUB_MODEL", "").strip()
+            or "gemini-3.6-flash"
+        ),
+    }
+
+
+def _get_llm_client() -> OpenAI:
+    """Initialize a bounded OpenAI-compatible client for the configured provider.
 
     SDK retries are disabled because ``call_ollama`` owns the retry policy. This
     prevents one logical attempt from expanding into nested, unobservable
     retries inside the client.
     """
-    token = os.getenv("GITHUB_TOKEN", "").strip()
-    if not token:
-        raise ValueError("Missing GITHUB_TOKEN environment variable. Set it in .env or export GITHUB_TOKEN=...")
-    base_url = os.getenv("GITHUB_MODELS_BASE_URL", "https://models.inference.ai.azure.com")
+    config = get_llm_config()
+    if not config["api_key"]:
+        raise ValueError(
+            "Missing LLM_API_KEY environment variable. Set it to the API key "
+            "issued by the configured LLM provider."
+        )
     timeout_seconds = float(os.getenv("LLM_REQUEST_TIMEOUT_SECONDS", "20"))
     return OpenAI(
-        base_url=base_url,
-        api_key=token,
+        base_url=config["base_url"],
+        api_key=config["api_key"],
         timeout=timeout_seconds,
         max_retries=0,
     )
@@ -151,15 +191,24 @@ def call_ollama(
     user_prompt: str,
     model: Optional[str] = None,
     stream: bool = False,
-    max_retries: int = 3
+    max_retries: int = 3,
+    response_model: Optional[Type[BaseModel]] = None,
 ) -> str:
-    """LLM API call via GitHub Models using OpenAI SDK (backward-compatible name).
+    """Call an OpenAI-compatible LLM and optionally enforce a Pydantic schema.
     
     Raises LLMError if all retries fail, instead of returning silent fallback JSON.
     """
-    model_name = model or os.getenv("GITHUB_MODEL", "gpt-4o-mini")
+    config = get_llm_config()
+    model_name = model or config["model"]
     temperature = float(os.getenv("LLM_TEMPERATURE", "0.3"))
     top_p = float(os.getenv("LLM_TOP_P", "0.9"))
+    reasoning_effort = os.getenv("LLM_REASONING_EFFORT", "low").strip()
+    response_schema = (
+        response_model.model_json_schema() if response_model is not None else None
+    )
+
+    if stream and response_model is not None:
+        raise ValueError("Structured LLM responses cannot be streamed")
 
     # Model parameters are part of the key so configuration changes cannot
     # accidentally reuse an answer produced under different sampling settings.
@@ -168,6 +217,9 @@ def call_ollama(
             "model": model_name,
             "temperature": temperature,
             "top_p": top_p,
+            "reasoning_effort": reasoning_effort,
+            "base_url": config["base_url"],
+            "response_schema": response_schema,
             "system_prompt": system_prompt,
             "user_prompt": user_prompt,
         },
@@ -184,19 +236,36 @@ def call_ollama(
 
     for attempt in range(1, max_retries + 1):
         try:
-            client = _get_github_client()
-
-            response = client.chat.completions.create(
-                model=model_name,
-                messages=[
+            client = _get_llm_client()
+            request = {
+                "model": model_name,
+                "messages": [
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
-                temperature=temperature,
-                max_tokens=int(os.getenv("LLM_MAX_TOKENS", "1024")),
-                top_p=top_p,
-                stream=stream,
-            )
+                "temperature": temperature,
+                "max_tokens": int(os.getenv("LLM_MAX_TOKENS", "2048")),
+                "top_p": top_p,
+            }
+
+            # Gemini thinking models count internal reasoning against the output
+            # limit. Keeping reasoning low leaves room for the required JSON.
+            if "generativelanguage.googleapis.com" in config["base_url"]:
+                request["reasoning_effort"] = reasoning_effort
+
+            if response_model is not None:
+                response = client.beta.chat.completions.parse(
+                    **request,
+                    response_format=response_model,
+                )
+                parsed = response.choices[0].message.parsed
+                if parsed is None:
+                    raise LLMError("LLM returned no structured response")
+                result = parsed.model_dump_json()
+                rag_cache.set(cache_key, result)
+                return result
+
+            response = client.chat.completions.create(**request, stream=stream)
 
             if stream:
                 full_response = ""
@@ -223,11 +292,19 @@ def call_ollama(
         except Exception as e:
             last_error = e
             print(f"  ⚠ LLM attempt {attempt}/{max_retries} failed: {str(e)[:100]}")
+            # Authentication, invalid requests, and retired endpoints will not
+            # recover during this request. Retrying them only adds latency.
+            permanent_error = getattr(e, "status_code", None) in {
+                400, 401, 403, 404, 410, 422
+            }
+            response_was_truncated = "length limit was reached" in str(e).lower()
+            if permanent_error or response_was_truncated:
+                break
             if attempt < max_retries:
                 time.sleep(1.5 * attempt)  # Short incremental backoff
 
     # All retries exhausted
-    error_msg = f"GitHub Models API failed after {max_retries} attempts: {str(last_error)}"
+    error_msg = f"LLM API request failed: {str(last_error)}"
     print(f"  ❌ {error_msg}")
     raise LLMError(error_msg)
 
@@ -397,7 +474,11 @@ Knowledge Base Context:
 
 Provide risk assessment in JSON format."""
 
-    response = call_ollama(RISK_AGENT_PROMPT, user_prompt)
+    response = call_ollama(
+        RISK_AGENT_PROMPT,
+        user_prompt,
+        response_model=RiskAssessment,
+    )
     result = parse_json_response(response)
     
     # Validate and coerce types
@@ -479,7 +560,11 @@ Knowledge Base:
 Select only an available carrier. Use the verified quote values and return the
 required JSON object."""
 
-    response = call_ollama(CARRIER_AGENT_PROMPT, user_prompt)
+    response = call_ollama(
+        CARRIER_AGENT_PROMPT,
+        user_prompt,
+        response_model=CarrierAgentOutput,
+    )
     result = parse_json_response(response)
     
     llm_upgrade = result.get("should_upgrade", False)
@@ -576,7 +661,11 @@ Knowledge Base:
 
 Provide recovery plan in JSON format. Return retention_probability as percentage (0-100)."""
 
-    response = call_ollama(RECOVERY_AGENT_PROMPT, user_prompt)
+    response = call_ollama(
+        RECOVERY_AGENT_PROMPT,
+        user_prompt,
+        response_model=CustomerRecoveryPlan,
+    )
     result = parse_json_response(response)
     
     # Validate discount and retention as percentages
@@ -650,7 +739,11 @@ Create executive summary and provide:
 
 Return JSON format."""
 
-    response = call_ollama(ORCHESTRATOR_PROMPT, user_prompt)
+    response = call_ollama(
+        ORCHESTRATOR_PROMPT,
+        user_prompt,
+        response_model=OrchestratorOutput,
+    )
     result = parse_json_response(response)
     
     # Validate confidence score with intelligent defaults
@@ -753,13 +846,13 @@ def run_multi_agent_analysis_parallel(scenario: DeliveryScenario) -> IntegratedD
 
 # Test if Ollama is available
 def check_ollama_status() -> bool:
-    """Return whether GitHub Models is configured (legacy compatibility name).
+    """Return whether an LLM provider is configured (legacy compatibility name).
 
     This is intentionally a local readiness check. Network reachability is
     verified by the authenticated debug probe or a real analysis request.
     """
-    token = os.getenv("GITHUB_TOKEN", "").strip()
-    return bool(token) and len(token) > 10
+    api_key = get_llm_config()["api_key"]
+    return bool(api_key) and len(api_key) > 10
 
 
 if __name__ == "__main__":

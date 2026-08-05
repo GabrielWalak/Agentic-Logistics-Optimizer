@@ -125,8 +125,12 @@ Knowledge Base:
 
 Provide risk assessment in JSON..."""
     
-    # ← HERE: CALLS GITHUB MODELS API via call_ollama()
-    response = call_ollama(RISK_AGENT_PROMPT_V2, user_prompt)
+    # Calls the configured OpenAI-compatible provider with a Pydantic schema
+    response = call_ollama(
+        RISK_AGENT_PROMPT_V2,
+        user_prompt,
+        response_model=RiskAssessment,
+    )
     #         ^^^^^^^^^^^ 
     #         THIS CALLS: pydantic_agents.py line 107-154
     
@@ -136,7 +140,7 @@ Provide risk assessment in JSON..."""
 
 ---
 
-### The Actual API Call: call_ollama() (pydantic_agents.py line 107-154)
+### The actual provider-neutral API call
 
 ```python
 def call_ollama(
@@ -145,7 +149,7 @@ def call_ollama(
     model: Optional[str] = None,
     stream: bool = False
 ) -> str:
-    """LLM API call via GitHub Models using OpenAI SDK"""
+    """OpenAI-compatible LLM call with structured Pydantic output."""
     
     try:
         # Step 1: Check cache (Redis optional)
@@ -156,23 +160,26 @@ def call_ollama(
             return cached
         
         # Step 2: Get LLM client
-        model_name = model or os.getenv("GITHUB_MODEL", "gpt-4o-mini")
-        client = _get_github_client()  # ← Creates OpenAI client for GitHub Models
+        config = get_llm_config()
+        model_name = model or config["model"]
+        client = _get_llm_client()
         
         # ← ← ← ACTUAL API CALL ← ← ←
-        response = client.chat.completions.create(
-            model=model_name,  # "gpt-4o-mini"
+        response = client.beta.chat.completions.parse(
+            model=model_name,
             messages=[
                 {"role": "system", "content": system_prompt},      # RISK_AGENT_PROMPT_V2
                 {"role": "user", "content": user_prompt},          # Scenario data
             ],
             temperature=0.3,    # Deterministic
-            max_tokens=1024,
+            max_tokens=2048,
             top_p=0.9,
+            reasoning_effort="low",
+            response_format=RiskAssessment,
         )
         
         # Step 3: Extract response
-        result = response.choices[0].message.content or ""
+        result = response.choices[0].message.parsed.model_dump_json()
         
         # Step 4: Cache for next time
         rag_cache.set(cache_key, result)
@@ -180,7 +187,7 @@ def call_ollama(
         return result
         
     except Exception as e:
-        return f'{{"error": "GitHub Models error: {str(e)}"}}'
+        raise LLMError(f"LLM API request failed: {e}")
 ```
 
 ---
@@ -213,7 +220,7 @@ call_ollama(
     system_prompt = RISK_AGENT_PROMPT_V2,  # "You are a Risk Assessment Specialist..."
     user_prompt = "Distance: 2800km\nWeight: 4500g\nDelay: 5.5 days\n..."
 )
-→ GitHub Models API (gpt-4o-mini)
+→ Gemini OpenAI-compatible API with `RiskAssessment` schema
 ← Response: {
     "risk_level": "HIGH",
     "risk_score": 78,
@@ -231,7 +238,7 @@ call_ollama(
     system_prompt = CARRIER_AGENT_PROMPT_V2,
     user_prompt = "Risk: HIGH (78)\nDistance: 2800km\nRecommend carrier..."
 )
-→ GitHub Models API
+→ Gemini OpenAI-compatible API
 ← Response: {
     "recommended_carrier": "Premium Express",
     "should_upgrade": true,
@@ -244,7 +251,7 @@ call_ollama(
     system_prompt = RECOVERY_AGENT_PROMPT_V2,
     user_prompt = "Risk: HIGH\nDelay: 5.5 days\nDesign recovery..."
 )
-→ GitHub Models API
+→ Gemini OpenAI-compatible API
 ← Response: {
     "voucher_code": "DELAY25",
     "discount_percentage": 25,
@@ -258,7 +265,7 @@ call_ollama(
     system_prompt = ORCHESTRATOR_PROMPT,
     user_prompt = "Risk: HIGH (78)\nCarrier: Upgrade to Premium (+$50)\nVoucher: DELAY25 (25%)..."
 )
-→ GitHub Models API
+→ Gemini OpenAI-compatible API
 ← Response: {
     "executive_summary": "Upgrade to Premium Express + send DELAY25 voucher on Day 1...",
     "confidence_score": 88,
@@ -290,7 +297,7 @@ Final Score: 85/100 ✅
 | **Agent 2: Carrier** | pydantic_agents.py | 337-380 | Calls API with carrier prompt |
 | **Agent 3: Recovery** | pydantic_agents.py | 385-430 | Calls API with recovery prompt |
 | **Agent 4: Orchestrator** | pydantic_agents.py | 433-500 | Calls API to integrate all 3 |
-| **Actual API Call** | pydantic_agents.py | 107-154 | `call_ollama()` → GitHub Models |
+| **Actual API Call** | pydantic_agents.py | provider client | `call_ollama()` → Gemini API |
 | **Response Parsing** | pydantic_agents.py | 158-175 | JSON extraction from LLM |
 | **Grading** | prompt_engineering.py | 95-250 | Validates logic (score 85/100) |
 
@@ -306,7 +313,7 @@ scenarios_examples.py (run_scenario_test)
 pydantic_agents.py (run_multi_agent_analysis_parallel)
     ├─ run_risk_assessment()
     │   └─ call_ollama(RISK_AGENT_PROMPT_V2, user_prompt)
-    │       └─ client.chat.completions.create()  ← GITHUB MODELS API
+    │       └─ client.beta.chat.completions.parse()  ← GEMINI API
     │
     ├─ ThreadPoolExecutor (parallel)
     │   ├─ run_carrier_optimization()
@@ -333,14 +340,14 @@ Result: IntegratedDecision (all graded)
 
 1. **scenario_examples.py defines scenarios** - distance, weight, delay, payment lag
 2. **pydantic_agents.py has 4 agent functions** - risk, carrier, recovery, orchestrator
-3. **Each agent calls `call_ollama()`** - that's the GitHub Models API call
+3. **Each agent calls `call_ollama()`** - the provider-neutral LLM boundary
 4. **`call_ollama()` does:**
-   - Create OpenAI client pointed to GitHub Models endpoint
+   - Create an OpenAI-compatible client pointed to the Gemini endpoint
    - Send system prompt (teaches LLM the rules)
    - Send user prompt (scenario data)
-   - Get JSON response back
+   - Enforce and validate a Pydantic response schema
    - Cache result for efficiency
-5. **4 API calls run (3 in parallel, 1 sequential)** - total 10-20 seconds
+5. **4 API calls run (agents 2 and 3 in parallel)** - usually several seconds
 6. **ResponseGrader validates each response** - checks logic, not just JSON format
 7. **Final score 0-100** - reflects quality of AI reasoning
 

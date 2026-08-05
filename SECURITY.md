@@ -8,7 +8,7 @@ the Azure VM with mode `600`.
 
 Sensitive application values include:
 
-- `GITHUB_TOKEN`
+- `LLM_API_KEY`
 - `API_KEY`
 - `PORTFOLIO_PASSWORD`
 - `POSTGRES_PASSWORD`

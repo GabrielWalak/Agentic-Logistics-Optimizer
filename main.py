@@ -27,6 +27,8 @@ from pydantic_agents import (
     run_multi_agent_analysis_parallel,
     LLMError,
     rag_cache,
+    get_llm_config,
+    _get_llm_client,
 )
 from prompt_engineering import ResponseGrader
 from ml_predictor import predict_delivery_days, get_model_info
@@ -457,8 +459,8 @@ async def root(request: Request) -> Response:
 async def health_check() -> HealthResponse:
     """Report component readiness without making a paid LLM request."""
 
-    token = os.getenv("GITHUB_TOKEN", "").strip()
-    llm_ready = bool(token) and len(token) > 10
+    llm_config = get_llm_config()
+    llm_ready = bool(llm_config["api_key"]) and len(llm_config["api_key"]) > 10
 
     try:
         database_ready = await asyncio.wait_for(
@@ -541,6 +543,7 @@ async def analyze_delivery(
                     endpoint="/analyze",
                     input_data=request_body.model_dump(),
                     output_data=decision.model_dump(),
+                    model_name=get_llm_config()["model"],
                     response_time_ms=int(processing_time_ms),
                 )
                 session.add(audit_log)
@@ -584,7 +587,7 @@ async def analyze_delivery(
         logger.error("LLM service unavailable", request_id=request_id, error=str(e))
         raise HTTPException(
             status_code=503,
-            detail=f"AI model unavailable: {str(e)}. Check GITHUB_TOKEN configuration.",
+            detail=f"AI model unavailable: {str(e)}. Check LLM provider configuration.",
         )
 
     except Exception as e:
@@ -862,11 +865,10 @@ async def debug_llm_test(
     _: str = Depends(verify_api_key),
 ) -> Dict[str, Any]:
     """Run an authenticated LLM probe without exposing credential metadata."""
-    from pydantic_agents import _get_github_client
-
-    token = os.getenv("GITHUB_TOKEN", "").strip()
-    model = os.getenv("GITHUB_MODEL", "gpt-4o-mini")
-    base_url = os.getenv("GITHUB_MODELS_BASE_URL", "https://models.inference.ai.azure.com")
+    config = get_llm_config()
+    token = config["api_key"]
+    model = config["model"]
+    base_url = config["base_url"]
 
     diagnostics = {
         "token_present": bool(token),
@@ -877,12 +879,12 @@ async def debug_llm_test(
     }
 
     if not token or len(token) < 10:
-        diagnostics["error"] = "GITHUB_TOKEN is missing or invalid."
+        diagnostics["error"] = "LLM_API_KEY is missing or invalid."
         return diagnostics
 
     try:
         def run_probe() -> str:
-            client = _get_github_client()
+            client = _get_llm_client()
             response = client.chat.completions.create(
                 model=model,
                 messages=[

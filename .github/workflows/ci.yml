@@ -96,7 +96,9 @@ jobs:
         env:
           API_KEY: test-api-key-for-ci
           ENVIRONMENT: testing
-          GITHUB_TOKEN: test-token-not-used-by-mocked-tests
+          LLM_API_KEY: test-key-not-used-by-mocked-tests
+          LLM_BASE_URL: https://generativelanguage.googleapis.com/v1beta/openai/
+          LLM_MODEL: gemini-3.6-flash
         run: python -m pytest -q
 
   container:

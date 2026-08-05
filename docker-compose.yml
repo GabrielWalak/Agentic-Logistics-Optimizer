@@ -53,11 +53,14 @@ services:
       REDIS_URL: redis://redis:6379/0
       REDIS_HOST: redis
       
-      # API Keys
-      GITHUB_TOKEN: ${GITHUB_TOKEN}
-      GITHUB_MODEL: ${GITHUB_MODEL:-gpt-4o-mini}
+      # LLM provider
+      LLM_API_KEY: ${LLM_API_KEY}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://generativelanguage.googleapis.com/v1beta/openai/}
+      LLM_MODEL: ${LLM_MODEL:-gemini-3.6-flash}
       API_KEY: ${API_KEY}
       LLM_REQUEST_TIMEOUT_SECONDS: ${LLM_REQUEST_TIMEOUT_SECONDS:-20}
+      LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-2048}
+      LLM_REASONING_EFFORT: ${LLM_REASONING_EFFORT:-low}
       ANALYSIS_TIMEOUT_SECONDS: ${ANALYSIS_TIMEOUT_SECONDS:-75}
       
       # Environment
@@ -66,7 +69,7 @@ services:
       
       # AWS (optional, for future Bedrock integration)
       AWS_REGION: ${AWS_REGION:-eu-central-1}
-      LLM_PROVIDER: ${LLM_PROVIDER:-github}
+      LLM_PROVIDER: ${LLM_PROVIDER:-gemini}
       
       PYTHONUNBUFFERED: 1
       PYTHONDONTWRITEBYTECODE: 1

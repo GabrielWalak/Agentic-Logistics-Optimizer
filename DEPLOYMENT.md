@@ -93,9 +93,11 @@ POSTGRES_USER=agentic_user
 POSTGRES_PASSWORD=<strong-database-password>
 POSTGRES_DB=logistics_app
 
-GITHUB_TOKEN=<github-models-token>
-GITHUB_MODELS_BASE_URL=https://models.inference.ai.azure.com
-GITHUB_MODEL=gpt-4o-mini
+LLM_API_KEY=<gemini-api-key>
+LLM_BASE_URL=https://generativelanguage.googleapis.com/v1beta/openai/
+LLM_MODEL=gemini-3.6-flash
+LLM_MAX_TOKENS=2048
+LLM_REASONING_EFFORT=low
 
 API_KEY=<random-api-key>
 PORTFOLIO_PASSWORD=<portfolio-password>

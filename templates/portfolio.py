@@ -76,7 +76,7 @@ def build_home_page(base_url: str, demo: Dict[str, Any]) -> str:
             <div class="badge-row">
                 <span class="badge">Python 3.11</span>
                 <span class="badge">FastAPI</span>
-                <span class="badge">GPT-4o-mini</span>
+                <span class="badge">Gemini Flash</span>
                 <span class="badge">Multi-Agent</span>
                 <span class="badge">RAG</span>
                 <span class="badge">PostgreSQL</span>
@@ -109,7 +109,7 @@ def build_home_page(base_url: str, demo: Dict[str, Any]) -> str:
         <div class="section">
             <h2>Technology Stack</h2>
             <div class="tech-grid">
-                <div class="tech-item"><div class="tech-label">LLM / AI</div><div class="tech-value">GPT-4o-mini via GitHub Models API</div></div>
+                <div class="tech-item"><div class="tech-label">LLM / AI</div><div class="tech-value">Gemini Flash via OpenAI-compatible API</div></div>
                 <div class="tech-item"><div class="tech-label">Framework</div><div class="tech-value">FastAPI + Pydantic V2</div></div>
                 <div class="tech-item"><div class="tech-label">Architecture</div><div class="tech-value">Multi-Agent Orchestration (4 agents)</div></div>
                 <div class="tech-item"><div class="tech-label">Knowledge Base</div><div class="tech-value">RAG + ChromaDB Vector Store</div></div>
@@ -194,7 +194,7 @@ def build_home_page(base_url: str, demo: Dict[str, Any]) -> str:
             </div>
         </div>
 
-        <div class="footer"><p>Multi-Agent Logistics AI &middot; FastAPI + GPT-4o-mini + RAG + PostgreSQL + Redis + Docker</p></div>
+        <div class="footer"><p>Multi-Agent Logistics AI &middot; FastAPI + Gemini + RAG + PostgreSQL + Redis + Docker</p></div>
     </div>
     <script>
     const DEMO_URL = "{base_url}/demo/analyze";

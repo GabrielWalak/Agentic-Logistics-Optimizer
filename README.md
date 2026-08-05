@@ -43,7 +43,7 @@ Delivery Scenario Input (distance, weight, time, payment)
 
 | Layer | Technology |
 |-------|-----------|
-| **LLM** | GPT-4o-mini via GitHub Models API |
+| **LLM** | Gemini Flash via OpenAI-compatible Gemini API |
 | **Framework** | FastAPI + Pydantic V2 |
 | **Architecture** | Multi-Agent Orchestration (4 agents) |
 | **Knowledge Base** | RAG + ChromaDB Vector Store |
@@ -162,7 +162,7 @@ pip install -r requirements.txt
 
 # 4. Configure environment
 cp .env.example .env
-# Edit .env with your GITHUB_TOKEN (needs 'models' permission)
+# Edit .env with your Gemini API key from Google AI Studio
 
 # 5. Run the API
 uvicorn main:app --reload

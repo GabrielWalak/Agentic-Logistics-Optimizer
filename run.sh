@@ -7,26 +7,26 @@ echo "=========================================="
 echo "AgenticAI Logistics - Docker Startup"
 echo "=========================================="
 
-# Check GitHub token
-if [ -z "$GITHUB_TOKEN" ]; then
-    echo "❌ ERROR: GITHUB_TOKEN not set!"
-    echo "Set it in .env or pass with -e GITHUB_TOKEN=xxx"
+# Check provider API key
+if [ -z "$LLM_API_KEY" ]; then
+    echo "❌ ERROR: LLM_API_KEY not set!"
+    echo "Set it in .env or pass with -e LLM_API_KEY=xxx"
     exit 1
 fi
 
-echo "✓ GITHUB_TOKEN detected"
-echo "✓ GitHub Models API: $GITHUB_MODELS_BASE_URL"
-echo "✓ Model: $GITHUB_MODEL"
+echo "✓ LLM_API_KEY detected"
+echo "✓ LLM API: $LLM_BASE_URL"
+echo "✓ Model: $LLM_MODEL"
 
 # Verify connection
 echo ""
-echo "Checking GitHub Models API connection..."
+echo "Checking LLM API configuration..."
 python3 -c "
 from pydantic_agents import check_ollama_status
 if check_ollama_status():
-    print('✓ GitHub Models API connected successfully!')
+    print('✓ LLM API configured successfully!')
 else:
-    print('❌ Failed to connect to GitHub Models API')
+    print('❌ LLM API configuration is incomplete')
     exit(1)
 " || exit 1
 

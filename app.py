@@ -168,11 +168,11 @@ Grading Criteria:
         
         print("\n🔍 Checking components...")
         
-        # Check GitHub Models
+        # Check the configured LLM provider
         if check_ollama_status():
-            print("  ✓ GitHub Models API: Connected")
+            print("  ✓ LLM API: Configured")
         else:
-            print("  ✗ GitHub Models API: Failed")
+            print("  ✗ LLM API: Not configured")
         
         # Check Pydantic models
         try:
@@ -204,7 +204,7 @@ Grading Criteria:
         print("""
 ╔════════════════════════════════════════════════════════════════╗
 ║          AGENTICAI - MULTI-AGENT LOGISTICS SYSTEM              ║
-║   Powered by GitHub Models API + Pydantic Agents + Grading     ║
+║   Powered by Gemini API + Pydantic Agents + Grading            ║
 ╚════════════════════════════════════════════════════════════════╝
         """)
         
