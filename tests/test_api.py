@@ -303,7 +303,10 @@ class TestDemoEndpoint:
         """Demo endpoint should work without API key."""
         mock_llm.side_effect = route_mock_llm
 
-        response = client.post("/demo/analyze", json={"scenario": "high"})
+        with patch("main.rag_cache.get", return_value=None), patch(
+            "main.rag_cache.set"
+        ):
+            response = client.post("/demo/analyze", json={"scenario": "high"})
         assert response.status_code == 200
         data = response.json()
         assert data["scenario"] == "high"
@@ -323,7 +326,10 @@ class TestDemoEndpoint:
         """The public demo remains usable and labels deterministic output."""
         mock_llm.side_effect = LLMError("Daily quota exhausted")
 
-        response = client.post("/demo/analyze", json={"scenario": "high"})
+        with patch("main.rag_cache.get", return_value=None), patch(
+            "main.rag_cache.set"
+        ):
+            response = client.post("/demo/analyze", json={"scenario": "high"})
 
         assert response.status_code == 200
         data = response.json()
