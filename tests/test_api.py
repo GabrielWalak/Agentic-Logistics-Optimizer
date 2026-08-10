@@ -28,9 +28,12 @@ async def mock_check_database_health():
     return True
 
 
-mock_database.get_session = mock_get_session
-mock_database.init_db = mock_init_db
-mock_database.check_database_health = mock_check_database_health
+# ModuleType is intentionally populated dynamically to replace the dependency
+# before importing the application. setattr makes that runtime behavior clear
+# without pretending these names are statically declared on ModuleType.
+setattr(mock_database, "get_session", mock_get_session)
+setattr(mock_database, "init_db", mock_init_db)
+setattr(mock_database, "check_database_health", mock_check_database_health)
 sys.modules["database"] = mock_database
 
 from main import app, API_KEY as CONFIGURED_API_KEY  # noqa: E402

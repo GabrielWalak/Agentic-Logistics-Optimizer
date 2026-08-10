@@ -58,7 +58,9 @@ async def run_async_migrations() -> None:
     """Create the asyncpg engine expected by the application's database URL."""
     url = DATABASE_URL
 
-    configuration = config.get_section(config.config_ini_section)
+    # Alembic may return None when the INI section is empty. Starting with an
+    # empty mapping keeps the async engine configuration explicit and typed.
+    configuration = config.get_section(config.config_ini_section) or {}
     configuration["sqlalchemy.url"] = url
 
     connectable = async_engine_from_config(

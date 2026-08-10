@@ -133,7 +133,8 @@ class TestCallOllamaRetry:
         mock_cache.get.return_value = None
         mock_cache.make_key.return_value = "test_key"
         error = Exception("Permanent provider failure")
-        error.status_code = status_code
+        # Provider SDK exceptions expose status_code dynamically.
+        setattr(error, "status_code", status_code)
         mock_client_fn.return_value.chat.completions.create.side_effect = error
 
         with pytest.raises(LLMError, match="Permanent provider failure"):

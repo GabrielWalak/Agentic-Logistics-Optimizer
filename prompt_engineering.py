@@ -4,7 +4,7 @@ Optimized prompts with evaluation metrics for logistics agent system
 """
 import json
 import re
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Tuple
 
 
 # ===== PRODUCTION AGENT PROMPTS =====
@@ -130,7 +130,9 @@ class ResponseGrader:
     """
     
     @staticmethod
-    def grade_risk_assessment(response: str) -> Tuple[float, Dict]:
+    def grade_risk_assessment(
+        response: str,
+    ) -> Tuple[float, Dict[str, Any]]:
         """
         Grade risk assessment response with stricter logic validation
         
@@ -141,14 +143,14 @@ class ResponseGrader:
             # Parse JSON
             data = json.loads(response.replace('```json', '').replace('```', '').strip())
             score = 0
-            details = {
+            details: Dict[str, Any] = {
                 "structure": False,
                 "risk_level_valid": False,
                 "score_alignment": False,  # NEW: Score matches risk level
                 "factors_specificity": False,  # NEW: Factors are specific
                 "analysis_depth": False
             }
-            deductions = []
+            deductions: List[str] = []
             
             # Check structure (20 pts)
             required_fields = ["risk_level", "risk_score", "primary_risk_factors", "analysis"]
@@ -232,13 +234,15 @@ class ResponseGrader:
     
     
     @staticmethod
-    def grade_carrier_recommendation(response: str) -> Tuple[float, Dict]:
+    def grade_carrier_recommendation(
+        response: str,
+    ) -> Tuple[float, Dict[str, Any]]:
         """Grade carrier optimization response with logic validation"""
         try:
             data = json.loads(response.replace('```json', '').replace('```', '').strip())
             score = 0
-            details = {}
-            deductions = []
+            details: Dict[str, Any] = {}
+            deductions: List[str] = []
             
             # Check structure (20 pts)
             required = ["recommended_carrier", "should_upgrade", "cost_impact", "roi_analysis"]
@@ -313,13 +317,15 @@ class ResponseGrader:
     
     
     @staticmethod
-    def grade_recovery_plan(response: str) -> Tuple[float, Dict]:
+    def grade_recovery_plan(
+        response: str,
+    ) -> Tuple[float, Dict[str, Any]]:
         """Grade customer recovery response with logic validation"""
         try:
             data = json.loads(response.replace('```json', '').replace('```', '').strip())
             score = 0
-            details = {}
-            deductions = []
+            details: Dict[str, Any] = {}
+            deductions: List[str] = []
             
             # Structure (20 pts)
             required = ["voucher_code", "discount_percentage", "communication_template", "retention_probability"]

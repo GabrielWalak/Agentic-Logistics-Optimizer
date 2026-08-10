@@ -803,6 +803,22 @@ async def demo_analyze(request_body: DemoRequest) -> Dict[str, Any]:
                 "timestamp": datetime.now(timezone.utc).isoformat(),
             }
 
+    # Establish a complete deterministic baseline before optional ML, RAG and
+    # LLM work begins. It also gives the LLM fallback valid state if an upstream
+    # provider raises LLMError earlier than expected.
+    predicted_days = float(params["promised_days"]) + 2.0
+    ml_used = False
+    scenario = DeliveryScenario(
+        predicted_days=predicted_days,
+        promised_days=params["promised_days"],
+        distance_km=params["distance_km"],
+        weight_g=params["weight_g"],
+        payment_lag_days=params["payment_lag_days"],
+        is_weekend_order=params["is_weekend_order"],
+        freight_value=params["freight_value"],
+        rag_context="",
+    )
+
     try:
         # The public demo uses fixed inputs, but follows the same ML -> RAG ->
         # agents sequence as the authenticated endpoint.
@@ -815,12 +831,12 @@ async def demo_analyze(request_body: DemoRequest) -> Dict[str, Any]:
             is_weekend_order=params["is_weekend_order"],
             purchase_month=params.get("purchase_month", 6),
         )
-        ml_used = ml_prediction is not None
-        predicted_days = (
-            ml_prediction
-            if ml_used
-            else params["promised_days"] + 2.0
-        )
+        if ml_prediction is None:
+            ml_used = False
+            predicted_days = float(params["promised_days"]) + 2.0
+        else:
+            ml_used = True
+            predicted_days = float(ml_prediction)
 
         rag_context = await asyncio.to_thread(
             _get_rag_context,

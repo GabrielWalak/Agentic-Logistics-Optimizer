@@ -7,8 +7,11 @@ import os
 from typing import AsyncGenerator
 
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.asyncio import (
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 from sqlmodel import SQLModel
 
 
@@ -29,16 +32,14 @@ engine = create_async_engine(
 )
 
 # Session factory for dependency injection
-async_session = sessionmaker(
-    engine,
-    class_=AsyncSession,
+async_session_factory = async_sessionmaker(
+    bind=engine,
     expire_on_commit=False,
-    autocommit=False,
     autoflush=False,
 )
 
 
-async def init_db():
+async def init_db() -> None:
     """Initialize database tables"""
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
@@ -56,8 +57,5 @@ async def check_database_health() -> bool:
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
     """Dependency for FastAPI to get async session"""
-    async with async_session() as session:
-        try:
-            yield session
-        finally:
-            await session.close()
+    async with async_session_factory() as session:
+        yield session

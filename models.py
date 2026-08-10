@@ -4,16 +4,24 @@ Audit logs (JSONB) + Sessions metadata
 """
 
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any
+from typing import Any, ClassVar, Dict, Optional, cast
 from uuid import uuid4
 
 from sqlmodel import SQLModel, Field
 from sqlalchemy import Column, JSON
+from sqlalchemy.orm import declared_attr
 
 
 class AuditLog(SQLModel, table=True):
     """Audit trail for all agent requests and responses"""
-    __tablename__ = "audit_logs"
+
+    # SQLModel exposes __tablename__ through SQLAlchemy's declared_attr. The
+    # cast describes that inherited contract to the type checker while the
+    # runtime value remains the table-name string expected by SQLAlchemy.
+    __tablename__: ClassVar[declared_attr[str]] = cast(
+        declared_attr[str],
+        "audit_logs",
+    )
     
     id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
     session_id: str = Field(index=True)
@@ -36,7 +44,11 @@ class AuditLog(SQLModel, table=True):
 
 class Session(SQLModel, table=True):
     """User sessions for agent conversations"""
-    __tablename__ = "sessions"
+
+    __tablename__: ClassVar[declared_attr[str]] = cast(
+        declared_attr[str],
+        "sessions",
+    )
     
     id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
     session_id: str = Field(index=True, unique=True)

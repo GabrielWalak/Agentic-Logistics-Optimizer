@@ -7,7 +7,7 @@ as price, availability, or estimated transit time.
 
 from dataclasses import dataclass
 from math import ceil
-from typing import List, Literal, Optional
+from typing import List, Literal, Mapping, Optional
 
 from pydantic import BaseModel, Field
 
@@ -55,7 +55,7 @@ class _CarrierProfile:
     max_weight_g: Optional[float] = None
 
 
-_PROFILES = {
+_PROFILES: Mapping[CarrierName, _CarrierProfile] = {
     "Standard Shipping": _CarrierProfile(
         base_cost=12,
         cost_per_km=0.012,

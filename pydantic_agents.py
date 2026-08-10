@@ -20,7 +20,18 @@ if sys.platform == 'win32':
             pass  # Skip if stdout is already wrapped or unavailable (e.g., pytest)
 
 from pydantic import BaseModel, Field
-from typing import Optional, List, Dict, Type
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    ParamSpec,
+    Protocol,
+    Type,
+    TypeVar,
+    cast,
+)
 from openai import OpenAI
 from dotenv import load_dotenv
 
@@ -40,26 +51,52 @@ from prompt_engineering import (
 load_dotenv()
 
 # Optional: Redis cache and LangSmith tracing
+_redis_module: Any = None
 try:
-    import redis
+    import redis as _redis_module
     REDIS_AVAILABLE = True
 except ImportError:
     REDIS_AVAILABLE = False
     print("⚠ Redis not available - install with: pip install redis")
 
 # LangSmith tracing (optional)
+P = ParamSpec("P")
+R = TypeVar("R")
+
+
+class _TraceableFactory(Protocol):
+    """Subset of LangSmith's decorator API used by this module."""
+
+    def __call__(
+        self,
+        *,
+        name: str = "",
+    ) -> Callable[[Callable[P, R]], Callable[P, R]]: ...
+
+
+def _noop_traceable(
+    *,
+    name: str = "",
+) -> Callable[[Callable[P, R]], Callable[P, R]]:
+    """Preserve decorated callables when LangSmith is unavailable."""
+    del name
+
+    def decorator(func: Callable[P, R]) -> Callable[P, R]:
+        return func
+
+    return decorator
+
+
+traceable: _TraceableFactory
 try:
-    from langsmith import traceable
+    from langsmith import traceable as _langsmith_traceable
+
+    traceable = cast(_TraceableFactory, _langsmith_traceable)
     LANGSMITH_AVAILABLE = True
 except ImportError:
+    traceable = _noop_traceable
     LANGSMITH_AVAILABLE = False
     print("⚠ LangSmith not available - install with: pip install langsmith")
-    
-    # Fallback: dummy decorator that does nothing
-    def traceable(name: str = ""):
-        def decorator(func):
-            return func
-        return decorator
 
 
 # ===== DATA MODELS =====
@@ -483,11 +520,15 @@ def call_ollama(
                 rag_cache.set(cache_key, result)
                 return result
 
-            response = client.chat.completions.create(**request, stream=stream)
-
             if stream:
+                # Literal stream flags let the SDK overloads expose the
+                # correct response type to Pylance in each control-flow path.
+                response_stream = client.chat.completions.create(
+                    **request,
+                    stream=True,
+                )
                 full_response = ""
-                for chunk in response:
+                for chunk in response_stream:
                     delta = chunk.choices[0].delta.content if chunk.choices else None
                     if delta:
                         full_response += delta
@@ -498,6 +539,7 @@ def call_ollama(
                 rag_cache.set(cache_key, full_response)
                 return full_response
 
+            response = client.chat.completions.create(**request, stream=False)
             result = response.choices[0].message.content or ""
             if not result.strip():
                 raise LLMError("LLM returned empty response")
@@ -557,30 +599,47 @@ def parse_json_response(response: str) -> Dict:
 
 # ===== REDIS CACHE MANAGER =====
 
+class _RedisClient(Protocol):
+    """Minimal synchronous Redis interface used by the cache."""
+
+    def ping(self) -> bool: ...
+
+    def get(self, key: str) -> Optional[str]: ...
+
+    def setex(self, key: str, ttl: int, value: str) -> Any: ...
+
+
 class RAGCache:
     """Best-effort Redis cache for LLM responses.
 
     The historical class name is kept for compatibility. Redis failures never
     fail an analysis; they only remove the cache optimization.
     """
-    def __init__(self):
+    def __init__(self) -> None:
+        self.redis: Optional[_RedisClient] = None
         self.enabled = False
-        if REDIS_AVAILABLE:
+        if REDIS_AVAILABLE and _redis_module is not None:
             try:
                 redis_url = os.getenv("REDIS_URL", "").strip()
                 if redis_url:
-                    self.redis = redis.Redis.from_url(
-                        redis_url,
-                        decode_responses=True,
-                        socket_connect_timeout=2,
+                    self.redis = cast(
+                        _RedisClient,
+                        _redis_module.Redis.from_url(
+                            redis_url,
+                            decode_responses=True,
+                            socket_connect_timeout=2,
+                        ),
                     )
                 else:
-                    self.redis = redis.Redis(
-                        host=os.getenv("REDIS_HOST", "localhost"),
-                        port=int(os.getenv("REDIS_PORT", "6379")),
-                        db=int(os.getenv("REDIS_DB", "0")),
-                        decode_responses=True,
-                        socket_connect_timeout=2,
+                    self.redis = cast(
+                        _RedisClient,
+                        _redis_module.Redis(
+                            host=os.getenv("REDIS_HOST", "localhost"),
+                            port=int(os.getenv("REDIS_PORT", "6379")),
+                            db=int(os.getenv("REDIS_DB", "0")),
+                            decode_responses=True,
+                            socket_connect_timeout=2,
+                        ),
                     )
                 self.redis.ping()
                 self.enabled = True
@@ -591,16 +650,16 @@ class RAGCache:
     
     def get(self, key: str) -> Optional[str]:
         """Get cached value"""
-        if not self.enabled:
+        if not self.enabled or self.redis is None:
             return None
         try:
             return self.redis.get(key)
         except Exception:
             return None
     
-    def set(self, key: str, value: str, ttl: int = 3600):
+    def set(self, key: str, value: str, ttl: int = 3600) -> None:
         """Cache value with TTL (default 1 hour)"""
-        if not self.enabled:
+        if not self.enabled or self.redis is None:
             return
         try:
             self.redis.setex(key, ttl, value)
@@ -609,7 +668,7 @@ class RAGCache:
 
     def is_healthy(self) -> bool:
         """Return the live cache status without leaking connection details."""
-        if not self.enabled:
+        if not self.enabled or self.redis is None:
             return False
         try:
             return bool(self.redis.ping())
