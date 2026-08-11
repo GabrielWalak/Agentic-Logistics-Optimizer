@@ -1,360 +1,293 @@
-# Complete Architecture Flow: Where API Gets Called
+# Runtime Architecture Flow
 
-## 🎯 Entry Point → API Call → Result
+This document describes the behavior implemented by the current code. The
+workflow uses explicit Python orchestration: LLMs propose typed specialist
+outputs, while deterministic code owns risk scoring, carrier quotes, fallback
+selection, grading, timeouts, and persistence decisions.
 
-### START: User runs app.py
+## System overview
 
-```bash
-python app.py
+```mermaid
+flowchart LR
+    Client[Client or portfolio UI]
+
+    subgraph API[FastAPI application]
+        Routes[HTTP routes]
+        Prepare[Scenario preparation]
+        Workflow[Four-agent workflow]
+        Grade[Behavioral grader]
+        Fallback[Deterministic demo fallback]
+    end
+
+    subgraph Compute[Local computation]
+        ML[XGBoost model]
+        CarrierTool[Typed carrier quote tool]
+        Rules[Risk and validation rules]
+    end
+
+    subgraph Providers[External provider]
+        Gemini[Gemini OpenAI-compatible API]
+    end
+
+    subgraph State[State and storage]
+        Redis[(Redis)]
+        Postgres[(PostgreSQL)]
+        Chroma[(Persistent ChromaDB)]
+        Metrics[In-process AppState]
+    end
+
+    Client --> Routes
+    Routes --> Prepare
+    Prepare --> ML
+    Prepare --> Chroma
+    Prepare --> Workflow
+    Workflow --> Gemini
+    Workflow --> CarrierTool
+    Workflow --> Rules
+    Workflow --> Redis
+    Workflow --> Grade
+    Workflow -. LLM unavailable in demo .-> Fallback
+    Grade --> Postgres
+    Routes --> Metrics
+    Grade --> Client
+    Fallback --> Client
 ```
 
-**app.py line 150+:**
-```python
-class AgenticAIApp:
-    def run_single_scenario(self):
-        # User picks scenario (e.g., "1" for HIGH-RISK)
-        scenario_name, scenario = self.scenarios[choice]  # Gets SCENARIO_1_HIGH_RISK
-        result = run_scenario_test(scenario, scenario_name)
-        return result
+Redis is an optimization rather than a correctness dependency. ChromaDB is an
+enrichment layer and falls back to neutral context when retrieval fails.
+PostgreSQL audit persistence is best effort and applies only to successful
+authenticated `/analyze` requests.
+
+## Endpoint entry paths
+
+```mermaid
+flowchart TD
+    Request[Incoming HTTP request] --> Route{Endpoint}
+
+    Route -->|/analyze| AnalyzeAuth[x-api-key verification]
+    Route -->|/batch-analyze| BatchAuth[x-api-key verification]
+    Route -->|/demo/analyze| DemoInput[Predefined scenario validation]
+    Route -->|/predict| MLOnly[XGBoost prediction only]
+
+    AnalyzeAuth --> AnalyzePrepare[Prepare one scenario]
+    BatchAuth --> BatchLoop[Process items sequentially]
+    BatchLoop --> BatchPrepare[Prepare current scenario]
+
+    DemoInput --> DemoCache{Completed response in Redis?}
+    DemoCache -->|yes| DemoHit[Return cached payload]
+    DemoCache -->|no| DemoPrepare[Run ML and RAG preparation]
+
+    AnalyzePrepare --> AgentWorkflow[Agent workflow]
+    BatchPrepare --> AgentWorkflow
+    DemoPrepare --> AgentWorkflow
 ```
 
----
+`rate_limit_check` is currently a permissive extension hook; it does not yet
+enforce a production rate limit. The portfolio page at `/` uses Basic Auth,
+while the predefined demo-analysis endpoint itself is public.
 
-## 🔄 Flow: app.py → scenarios_examples.py → pydantic_agents.py
+## Scenario preparation: ML and RAG
 
-### STEP 1: Choose Scenario in app.py (Menu Option 1)
+`/analyze` and each `/batch-analyze` item use
+`_prepare_analysis_scenario`. The demo follows the same logical preparation
+with fixed server-side inputs.
 
-```python
-# app.py line 62-70
-def run_single_scenario(self):
-    choice = input("Enter scenario number (1-3): ")  # User enters "1"
-    scenario_name, scenario = self.scenarios[choice]  # = SCENARIO_1_HIGH_RISK
+```mermaid
+sequenceDiagram
+    autonumber
+    participant API as FastAPI endpoint
+    participant Worker as asyncio worker thread
+    participant ML as XGBoost predictor
+    participant Vector as ChromaDB
+    participant KB as Logistics documents
+
+    API->>Worker: prepare AnalysisRequest
+
+    alt predicted_days is missing or non-positive
+        Worker->>ML: predict_delivery_days(features)
+        ML-->>Worker: predicted days or None
+        opt model returns None
+            Worker->>Worker: use 7.0-day fallback
+        end
+    else caller supplied predicted_days
+        Worker->>Worker: keep supplied prediction
+    end
+
+    alt rag_context has the default marker
+        Worker->>Vector: open persistent collection
+        alt collection is empty
+            Vector->>KB: index six source documents
+        end
+        Worker->>Vector: similarity query for scenario
+        Vector-->>Worker: relevant context
+        opt retrieval fails or returns no context
+            Worker->>Worker: use neutral default context
+        end
+    else caller supplied custom context
+        Worker->>Worker: keep supplied context
+    end
+
+    Worker-->>API: validated DeliveryScenario
 ```
 
-**SCENARIO_1_HIGH_RISK from scenarios_examples.py (line 10-28):**
-```python
-SCENARIO_1_HIGH_RISK = DeliveryScenario(
-    predicted_days=12.5,
-    promised_days=7.0,
-    distance_km=2800,        # ← LONG DISTANCE
-    weight_g=4500,           # ← HEAVY WEIGHT
-    payment_lag_days=5,
-    is_weekend_order=1,      # ← WEEKEND
-    freight_value=150.00,
-    rag_context="Distance Guidelines: Deliveries over 2000km require premium carriers..."
-)
+Blocking ML and vector operations run through `asyncio.to_thread`, keeping the
+FastAPI event loop available for other requests.
+
+## Agent orchestration and concurrency
+
+```mermaid
+flowchart TD
+    Scenario[DeliveryScenario] --> RiskRules[Calculate authoritative risk score]
+    RiskRules --> RiskLLM[Agent 1: explain risk]
+    RiskLLM --> NormalizeRisk[Replace contradictory or unsupported claims]
+
+    NormalizeRisk --> Parallel{ThreadPoolExecutor max_workers=2}
+
+    Parallel --> CarrierStart[Agent 2: carrier optimization]
+    CarrierStart --> AllQuotes[get_all_carrier_quotes]
+    AllQuotes --> QuoteTool[get_carrier_quote for each of 5 carriers]
+    QuoteTool --> RateCard[Local deterministic rate card]
+    RateCard --> CarrierLLM[LLM selects and explains an available option]
+    CarrierLLM --> SelectQuote[select_carrier_quote validates or falls back]
+    SelectQuote --> CarrierResult[CarrierRecommendation]
+
+    Parallel --> RecoveryLLM[Agent 3: recovery strategy]
+    RecoveryLLM --> RecoveryRules[Normalize voucher, discount and retention]
+    RecoveryRules --> RecoveryResult[CustomerRecoveryPlan]
+
+    CarrierResult --> Join[Wait for both futures]
+    RecoveryResult --> Join
+    Join --> Orchestrator[Agent 4: integrate specialist outputs]
+    Orchestrator --> Bound[Bound confidence and validate summary]
+    Bound --> Decision[IntegratedDecision]
 ```
 
----
+Agent 1 must finish first because its normalized risk output is an input to
+Agents 2 and 3. Only Agents 2 and 3 execute concurrently. Agent 4 starts after
+both futures have completed.
 
-### STEP 2: Call Multi-Agent Orchestrator
+The carrier capability is deliberately split into three responsibilities:
 
-**app.py line 70:**
-```python
-result = run_scenario_test(scenario, scenario_name)
+1. `get_carrier_quote` is the core typed deterministic tool.
+2. `get_all_carrier_quotes` calls it for every local carrier profile.
+3. `select_carrier_quote` validates the LLM recommendation and chooses the
+   fastest or cheapest available fallback when necessary.
+
+The tool does not call a production carrier API. Its Pydantic contracts allow
+the local rate card to be replaced later by an authenticated REST or MCP
+implementation without changing the agent-facing result shape.
+
+## One LLM call and its Redis cache
+
+Every agent calls the same provider-neutral `call_ollama` function. The legacy
+name is retained for compatibility; the configured implementation uses an
+OpenAI-compatible client and currently targets Gemini.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Agent
+    participant Cache as Redis LLM cache
+    participant Client as OpenAI-compatible client
+    participant LLM as Gemini API
+    participant Schema as Pydantic model
+
+    Agent->>Agent: build key from model, sampling, schema and prompts
+    Agent->>Cache: GET cache key
+
+    alt cache hit
+        Cache-->>Agent: structured JSON
+    else cache miss or Redis unavailable
+        loop up to configured retry limit
+            Agent->>Client: system prompt + user prompt + response schema
+            Client->>LLM: HTTPS request
+            LLM-->>Client: structured response or provider error
+        end
+        Client->>Schema: validate parsed output
+        Schema-->>Agent: typed result
+        Agent->>Cache: SETEX result with 1-hour TTL
+    end
 ```
 
-**scenarios_examples.py line 100+ (run_scenario_test):**
-```python
-def run_scenario_test(scenario: DeliveryScenario, scenario_name: str) -> Dict:
-    print(f"\n{'='*80}")
-    print(f" {scenario_name}")
-    print(f"{'='*80}\n")
-    
-    # ← HERE: CALL THE MULTI-AGENT SYSTEM
-    result: IntegratedDecision = run_multi_agent_analysis_parallel(scenario)
+Authentication, invalid-request, retired-endpoint, and quota errors are treated
+as permanent for the current request and are not repeatedly retried. Redis
+connection or command failures only disable the cache path.
+
+## Grading, persistence, and response behavior
+
+```mermaid
+flowchart TD
+    Decision[IntegratedDecision] --> Route{Calling endpoint}
+
+    Route -->|/analyze| GradeAnalyze[Grade risk, carrier and recovery]
+    GradeAnalyze --> MeanAnalyze[Arithmetic mean: overall_score]
+    MeanAnalyze --> DBReady{PostgreSQL ready?}
+    DBReady -->|yes| Audit[Best-effort AuditLog commit]
+    DBReady -->|no| AnalyzeResponse[AnalysisResponse]
+    Audit --> AnalyzeResponse
+
+    Route -->|/demo/analyze| GradeDemo[Grade risk, carrier and recovery]
+    GradeDemo --> MeanDemo[Arithmetic mean: overall_score]
+    MeanDemo --> DemoWrite[Cache completed payload for 10 minutes]
+    DemoWrite --> DemoResponse[Demo JSON response]
+
+    Route -->|/batch-analyze| BatchResult[Append decision to current item]
+    BatchResult --> Next{More items?}
+    Next -->|yes| PrepareNext[Prepare next item]
+    Next -->|no| BatchResponse[Batch summary and per-item results]
 ```
 
----
+The grader's `overall_score` and Agent 4's `confidence_score` are separate
+values. The former is the arithmetic mean of three deterministic specialist
+scores; the latter is a bounded evidence-quality estimate in the decision.
 
-### STEP 3: MAIN FLOW - pydantic_agents.py (Line 540+)
+## Timeouts and failure paths
 
-**pydantic_agents.py line 540-556:**
-```python
-@traceable(name="multi_agent_analysis")
-def run_multi_agent_analysis_parallel(scenario: DeliveryScenario) -> IntegratedDecision:
-    """
-    THIS IS WHERE THE MAGIC HAPPENS
-    scenario = DeliveryScenario with distance_km=2800, weight_g=4500, etc
-    """
-    start_time = time.time()
-    print("🤖 Starting multi-agent analysis (parallel)...")
-    
-    # AGENT 1: RISK ASSESSMENT (Line 558-559)
-    print("  ├─ Agent 1: Risk Assessment...")
-    risk_dict = run_risk_assessment(scenario)  # ← FIRST API CALL
-    
-    # AGENTS 2-3: PARALLEL (Line 562-567)
-    print("  ├─ Agents 2-3: Parallel execution...")
-    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
-        carrier_future = executor.submit(run_carrier_optimization, scenario, risk_dict)  # ← PARALLEL API CALL
-        recovery_future = executor.submit(run_recovery_strategy, scenario, risk_dict)    # ← PARALLEL API CALL
-        
-        carrier_dict = carrier_future.result()
-        recovery_dict = recovery_future.result()
-    
-    # AGENT 4: ORCHESTRATOR (Line 571-572)
-    print("  └─ Agent 4: Decision Integration...")
-    orchestrator_dict = run_orchestrator(scenario, risk_dict, carrier_dict, recovery_dict)  # ← FINAL API CALL
+```mermaid
+flowchart TD
+    Run[Run workflow through asyncio.wait_for] --> Outcome{Outcome}
+
+    Outcome -->|success| Success[Return endpoint-specific response]
+    Outcome -->|timeout| Endpoint{Endpoint}
+    Outcome -->|LLMError| LLMEndpoint{Endpoint}
+    Outcome -->|other exception| Other[HTTP 500 or batch item error]
+
+    Endpoint -->|/analyze or /demo/analyze| Timeout504[HTTP 504]
+    Endpoint -->|/batch-analyze| TimeoutItem[Record timeout for current item]
+
+    LLMEndpoint -->|/analyze| Unavailable503[HTTP 503]
+    LLMEndpoint -->|/demo/analyze| DemoFallback[Build deterministic fallback decision]
+    LLMEndpoint -->|/batch-analyze| LLMItem[Record error for current item]
+
+    DemoFallback --> FallbackGrade[Run deterministic grader]
+    FallbackGrade --> FallbackResponse[Return fallback_used true]
 ```
 
----
+The authenticated analysis endpoint never presents a deterministic fallback as
+an LLM-generated decision. The public demo explicitly exposes `fallback_used`
+and `fallback_reason` so the degraded mode remains visible.
 
-## 🌐 WHERE THE ACTUAL API CALLS HAPPEN
+## State ownership
 
-### Agent 1: Risk Assessment (pydantic_agents.py line 295-330)
+| State | Owner | Lifetime | Role |
+|---|---|---|---|
+| Request and agent values | Pydantic models | One analysis | Validate boundaries between stages |
+| Counters and latency | `AppState` | Process lifetime | `/status` operational metrics |
+| Database readiness | `app.state.db_ready` | Refreshed at runtime | Gate best-effort audit writes |
+| LLM response cache | Redis | 1-hour TTL | Reuse schema-aware agent responses |
+| Demo response cache | Redis | 10-minute TTL | Reuse complete predefined results |
+| Audit log | PostgreSQL/SQLModel | Durable | Store successful `/analyze` inputs and decisions |
+| Vector collection | Persistent ChromaDB | Durable local volume | Retrieve logistics knowledge context |
 
-```python
-@traceable(name="risk_assessment_agent")
-def run_risk_assessment(scenario: DeliveryScenario) -> Dict:
-    """Agent 1: Evaluates delivery risk"""
-    
-    # Build user prompt from scenario
-    delay_days = scenario.predicted_days - scenario.promised_days  # 12.5 - 7 = 5.5 days
-    
-    user_prompt = f"""Analyze this delivery scenario:
-    
-Distance: {scenario.distance_km}km (2800)
-Weight: {scenario.weight_g}g (4500)
-Delay: {delay_days:.1f} days (5.5)
-Payment Lag: {scenario.payment_lag_days} days
-Weekend Order: {scenario.is_weekend_order == 1}
+## Source map
 
-Knowledge Base:
-{scenario.rag_context}
-
-Provide risk assessment in JSON..."""
-    
-    # Calls the configured OpenAI-compatible provider with a Pydantic schema
-    response = call_ollama(
-        RISK_AGENT_PROMPT_V2,
-        user_prompt,
-        response_model=RiskAssessment,
-    )
-    #         ^^^^^^^^^^^ 
-    #         THIS CALLS: pydantic_agents.py line 107-154
-    
-    result = parse_json_response(response)  # Parse JSON from LLM
-    return result
-```
-
----
-
-### The actual provider-neutral API call
-
-```python
-def call_ollama(
-    system_prompt: str,      # = RISK_AGENT_PROMPT_V2
-    user_prompt: str,        # = "Analyze this delivery scenario: Distance 2800km..."
-    model: Optional[str] = None,
-    stream: bool = False
-) -> str:
-    """OpenAI-compatible LLM call with structured Pydantic output."""
-    
-    try:
-        # Step 1: Check cache (Redis optional)
-        cache_key = rag_cache.make_key(system_prompt + user_prompt)
-        cached = rag_cache.get(cache_key)
-        if cached:
-            print("[cached] ", end="", flush=True)
-            return cached
-        
-        # Step 2: Get LLM client
-        config = get_llm_config()
-        model_name = model or config["model"]
-        client = _get_llm_client()
-        
-        # ← ← ← ACTUAL API CALL ← ← ←
-        response = client.beta.chat.completions.parse(
-            model=model_name,
-            messages=[
-                {"role": "system", "content": system_prompt},      # RISK_AGENT_PROMPT_V2
-                {"role": "user", "content": user_prompt},          # Scenario data
-            ],
-            temperature=0.3,    # Deterministic
-            max_tokens=2048,
-            top_p=0.9,
-            reasoning_effort="low",
-            response_format=RiskAssessment,
-        )
-        
-        # Step 3: Extract response
-        result = response.choices[0].message.parsed.model_dump_json()
-        
-        # Step 4: Cache for next time
-        rag_cache.set(cache_key, result)
-        
-        return result
-        
-    except Exception as e:
-        raise LLMError(f"LLM API request failed: {e}")
-```
-
----
-
-## 📊 CONCRETE EXAMPLE: HIGH-RISK SCENARIO
-
-### What happens step-by-step:
-
-```
-User runs: python app.py → Menu Option 1
-     ↓
-Scenario chosen: "1" (HIGH-RISK)
-     ↓
-SCENARIO_1_HIGH_RISK = {
-    predicted_days: 12.5,
-    promised_days: 7.0,
-    distance_km: 2800,
-    weight_g: 4500,
-    ...
-}
-     ↓
-run_scenario_test(SCENARIO_1_HIGH_RISK, "HIGH-RISK: Long Distance...")
-     ↓
-run_multi_agent_analysis_parallel(SCENARIO_1_HIGH_RISK)
-     ↓
-     
-AGENT 1 API CALL:
-─────────────────
-call_ollama(
-    system_prompt = RISK_AGENT_PROMPT_V2,  # "You are a Risk Assessment Specialist..."
-    user_prompt = "Distance: 2800km\nWeight: 4500g\nDelay: 5.5 days\n..."
-)
-→ Gemini OpenAI-compatible API with `RiskAssessment` schema
-← Response: {
-    "risk_level": "HIGH",
-    "risk_score": 78,
-    "primary_risk_factors": ["Long distance (2800km)", "Heavy weight (4500g)", "Weekend order"],
-    "mitigation_priority": "URGENT",
-    "analysis": "2800km exceeds 2000km threshold requiring premium carrier..."
-  }
-
-     ↓
-AGENTS 2-3 RUN IN PARALLEL:
-──────────────────────────
-
-Carrier Agent calls:
-call_ollama(
-    system_prompt = CARRIER_AGENT_PROMPT_V2,
-    user_prompt = "Risk: HIGH (78)\nDistance: 2800km\nRecommend carrier..."
-)
-→ Gemini OpenAI-compatible API
-← Response: {
-    "recommended_carrier": "Premium Express",
-    "should_upgrade": true,
-    "cost_impact": 50,
-    ...
-  }
-
-Recovery Agent calls:
-call_ollama(
-    system_prompt = RECOVERY_AGENT_PROMPT_V2,
-    user_prompt = "Risk: HIGH\nDelay: 5.5 days\nDesign recovery..."
-)
-→ Gemini OpenAI-compatible API
-← Response: {
-    "voucher_code": "DELAY25",
-    "discount_percentage": 25,
-    ...
-  }
-
-     ↓
-AGENT 4 ORCHESTRATOR:
-────────────────────
-call_ollama(
-    system_prompt = ORCHESTRATOR_PROMPT,
-    user_prompt = "Risk: HIGH (78)\nCarrier: Upgrade to Premium (+$50)\nVoucher: DELAY25 (25%)..."
-)
-→ Gemini OpenAI-compatible API
-← Response: {
-    "executive_summary": "Upgrade to Premium Express + send DELAY25 voucher on Day 1...",
-    "confidence_score": 88,
-    ...
-  }
-
-     ↓
-GRADING (prompt_engineering.py):
-────────────────────────────────
-ResponseGrader validates each response:
-- Risk: 78 ✓ HIGH range? YES (61-80) → 25/25 points
-- Carrier: cost_impact > 0 when upgrade=true? YES → 20/20 points
-- Recovery: DELAY25 matches 25% discount? YES → 15/15 points
-
-Final Score: 85/100 ✅
-```
-
----
-
-## 🎯 KEY INSIGHTS
-
-| Part | File | Line | What It Does |
-|------|------|------|-------------|
-| **User Interface** | app.py | 62-70 | Menu → Scenario selection |
-| **Scenario Definition** | scenarios_examples.py | 10-28 | Data: 2800km, 4500g, etc |
-| **Test Runner** | scenarios_examples.py | 100+ | Calls multi-agent analysis |
-| **Main Orchestrator** | pydantic_agents.py | 540-580 | Coordinates 4 agents in parallel |
-| **Agent 1: Risk** | pydantic_agents.py | 295-330 | Calls API with risk prompt |
-| **Agent 2: Carrier** | pydantic_agents.py | 337-380 | Calls API with carrier prompt |
-| **Agent 3: Recovery** | pydantic_agents.py | 385-430 | Calls API with recovery prompt |
-| **Agent 4: Orchestrator** | pydantic_agents.py | 433-500 | Calls API to integrate all 3 |
-| **Actual API Call** | pydantic_agents.py | provider client | `call_ollama()` → Gemini API |
-| **Response Parsing** | pydantic_agents.py | 158-175 | JSON extraction from LLM |
-| **Grading** | prompt_engineering.py | 95-250 | Validates logic (score 85/100) |
-
----
-
-## 🔗 EXECUTION CHAIN
-
-```
-app.py (Menu)
-    ↓
-scenarios_examples.py (run_scenario_test)
-    ↓
-pydantic_agents.py (run_multi_agent_analysis_parallel)
-    ├─ run_risk_assessment()
-    │   └─ call_ollama(RISK_AGENT_PROMPT_V2, user_prompt)
-    │       └─ client.beta.chat.completions.parse()  ← GEMINI API
-    │
-    ├─ ThreadPoolExecutor (parallel)
-    │   ├─ run_carrier_optimization()
-    │   │   └─ call_ollama(CARRIER_AGENT_PROMPT_V2, ...)  ← API
-    │   └─ run_recovery_strategy()
-    │       └─ call_ollama(RECOVERY_AGENT_PROMPT_V2, ...)  ← API
-    │
-    └─ run_orchestrator()
-        └─ call_ollama(ORCHESTRATOR_PROMPT, ...)  ← API
-    
-    ↓
-prompt_engineering.py (ResponseGrader)
-    ├─ grade_risk_assessment()
-    ├─ grade_carrier_optimization()
-    └─ grade_recovery_strategy()
-    
-    ↓
-Result: IntegratedDecision (all graded)
-```
-
----
-
-## 💡 WHAT YOU NEED TO UNDERSTAND
-
-1. **scenario_examples.py defines scenarios** - distance, weight, delay, payment lag
-2. **pydantic_agents.py has 4 agent functions** - risk, carrier, recovery, orchestrator
-3. **Each agent calls `call_ollama()`** - the provider-neutral LLM boundary
-4. **`call_ollama()` does:**
-   - Create an OpenAI-compatible client pointed to the Gemini endpoint
-   - Send system prompt (teaches LLM the rules)
-   - Send user prompt (scenario data)
-   - Enforce and validate a Pydantic response schema
-   - Cache result for efficiency
-5. **4 API calls run (agents 2 and 3 in parallel)** - usually several seconds
-6. **ResponseGrader validates each response** - checks logic, not just JSON format
-7. **Final score 0-100** - reflects quality of AI reasoning
-
----
-
-**Want to trace through the code yourself?** Start here:
-- User selects scenario: [app.py:62](app.py#L62)
-- Scenario sent to orchestrator: [scenarios_examples.py:100](scenarios_examples.py#L100)
-- Orchestrator runs 4 agents: [pydantic_agents.py:540](pydantic_agents.py#L540)
-- Each agent calls API: [pydantic_agents.py:107](pydantic_agents.py#L107)
+| Responsibility | Implementation |
+|---|---|
+| HTTP endpoints, preparation, timeout and grading | `main.py` |
+| Agent models, LLM client, Redis and orchestration | `pydantic_agents.py` |
+| Carrier quote contracts and deterministic rate card | `carrier_tools.py` |
+| XGBoost inference | `ml_predictor.py` |
+| ChromaDB indexing and retrieval | `chroma_db_manager.py` |
+| PostgreSQL engine and sessions | `database.py` |
+| SQLModel audit tables | `models.py` |
+| Prompts and deterministic grader | `prompt_engineering.py` |

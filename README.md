@@ -14,48 +14,48 @@ The portfolio page is protected with Basic Auth. Its three predefined scenarios 
 
 ## End-to-End Request Flow
 
-```text
-POST /analyze, /batch-analyze, or /demo/analyze
-        |
-        v
-Pydantic request validation
-        |
-        +-- predicted_days missing? --> XGBoost prediction
-        |
-        +-- default RAG context? ----> ChromaDB similarity search
-        |
-        v
-Agent 1: Risk Assessment
-        |
-        +-- application recalculates the authoritative score, level,
-        |   priority, and scored factors from deterministic rules
-        |
-        +-------------------------------+
-        |                               |
-        v                               v
-Agent 2: Carrier Optimization     Agent 3: Recovery Strategy
-        |                               |
-Typed carrier quote tool               |
-        +---------------+---------------+
-                        |
-                        v
-             Agent 4: Decision Orchestrator
-                        |
-                        v
-             Pydantic IntegratedDecision
-                        |
-                        v
-        Deterministic ResponseGrader
-        Risk score + Carrier score + Recovery score
-                        |
-                        v
-             arithmetic mean (0-100)
-                        |
-                        +-- PostgreSQL audit log for /analyze
-                        |
-                        v
-                    API response
+```mermaid
+flowchart TD
+    Client[API client] --> Route{FastAPI endpoint}
+    Route --> Validation[Pydantic request validation]
+    Validation -->|POST /analyze or /batch-analyze| Auth[x-api-key verification]
+    Validation -->|POST /demo/analyze| DemoCache{Redis demo-response cache}
+    DemoCache -->|hit| Response[JSON response]
+    DemoCache -->|miss| Preparation
+    Auth --> Preparation
+
+    Preparation[Scenario preparation in asyncio.to_thread]
+    Preparation -->|predicted_days missing| ML[XGBoost prediction]
+    Preparation -->|default RAG context| Chroma[ChromaDB similarity search]
+    ML --> Scenario[DeliveryScenario]
+    Chroma --> Scenario
+    Preparation --> Scenario
+
+    Scenario --> Timeout[Application timeout boundary]
+    Timeout --> Risk[Agent 1: Risk Assessment]
+    Risk --> Grounding[Deterministic risk grounding]
+    Grounding --> Carrier[Agent 2: Carrier Optimization]
+    Grounding --> Recovery[Agent 3: Recovery Strategy]
+
+    Carrier --> QuoteTool[Typed carrier quote tool]
+    QuoteTool --> Selection[Deterministic selection and fallback]
+    Selection --> Orchestrator[Agent 4: Decision Orchestrator]
+    Recovery --> Orchestrator
+
+    Orchestrator --> Decision[Pydantic IntegratedDecision]
+    Decision --> Grader[Deterministic ResponseGrader for analyze and demo]
+    Decision --> BatchResult[Per-item result for batch]
+    Grader --> Audit[(PostgreSQL audit for /analyze)]
+    Grader --> CacheWrite[(Redis response cache for demo)]
+    Audit --> Response
+    CacheWrite --> Response
+    Grader --> Response
+    BatchResult --> Response
 ```
+
+The LLM calls made by all four agents use a separate schema-aware Redis cache.
+The detailed cache, concurrency, persistence, and failure paths are documented
+in [ARCHITECTURE_FLOW.md](ARCHITECTURE_FLOW.md).
 
 ### Agent orchestration
 
@@ -160,7 +160,7 @@ For example, specialist scores `80`, `87`, and `80` produce `82.3/100`. Decision
 | `GET` | `/` | Basic Auth | Portfolio page and live scenarios |
 | `POST` | `/analyze` | `x-api-key` | Full analysis with optional automatic ML/RAG preparation |
 | `POST` | `/batch-analyze` | `x-api-key` | Sequential batch with per-item results |
-| `POST` | `/predict` | `x-api-key` | XGBoost delivery-time prediction |
+| `POST` | `/predict` | None | XGBoost delivery-time prediction |
 | `POST` | `/demo/analyze` | None | Three predefined public portfolio scenarios |
 | `GET` | `/health` | None | Live LLM configuration, Redis, PostgreSQL, and ML readiness |
 | `GET` | `/status` | None | In-process runtime metrics |
