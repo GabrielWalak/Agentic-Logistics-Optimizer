@@ -32,24 +32,28 @@ flowchart TD
     Preparation --> Scenario
 
     Scenario --> Timeout[Application timeout boundary]
-    Timeout --> Risk[Agent 1: Risk Assessment]
-    Risk --> Grounding[Deterministic risk grounding]
-    Grounding --> Carrier[Agent 2: Carrier Optimization]
+    Timeout --> RiskRules[Calculate deterministic risk score]
+    RiskRules --> RiskLLM[Agent 1: explain risk]
+    RiskLLM --> Grounding[Normalize and ground risk output]
+    Grounding --> CarrierStart[Agent 2 starts]
     Grounding --> Recovery[Agent 3: Recovery Strategy]
 
-    Carrier --> QuoteTool[Typed carrier quote tool]
-    QuoteTool --> Selection[Deterministic selection and fallback]
+    CarrierStart --> QuoteTool[Calculate verified carrier quotes]
+    QuoteTool --> CarrierLLM[LLM selects and explains a carrier]
+    CarrierLLM --> Selection[Validate selection or apply fallback]
     Selection --> Orchestrator[Agent 4: Decision Orchestrator]
     Recovery --> Orchestrator
 
     Orchestrator --> Decision[Pydantic IntegratedDecision]
-    Decision --> Grader[Deterministic ResponseGrader for analyze and demo]
-    Decision --> BatchResult[Per-item result for batch]
-    Grader --> Audit[(PostgreSQL audit for /analyze)]
-    Grader --> CacheWrite[(Redis response cache for demo)]
+    Decision --> ResultPath{Calling endpoint}
+    ResultPath -->|/analyze or /demo/analyze| Grader[Deterministic ResponseGrader]
+    ResultPath -->|/batch-analyze| BatchResult[Per-item result]
+
+    Grader --> OutputPath{Calling endpoint}
+    OutputPath -->|/analyze| Audit[Best-effort PostgreSQL audit]
+    OutputPath -->|/demo/analyze| CacheWrite[Redis response cache]
     Audit --> Response
     CacheWrite --> Response
-    Grader --> Response
     BatchResult --> Response
 ```
 
