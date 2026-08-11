@@ -1,208 +1,288 @@
-# 🤖 AgenticAI - Multi-Agent Logistics Decision System
+# Multi-Agent Logistics AI System
 
-A Decision Intelligence system combining ML predictions with Multi-Agent LLM architecture for autonomous e-commerce delivery risk analysis.
+A portfolio implementation of a logistics decision-support workflow. The API combines an XGBoost delivery-time prediction, ChromaDB retrieval, four LLM roles, a typed carrier quote tool, deterministic business rules, and behavioral grading.
 
----
+The project deliberately uses explicit Python orchestration instead of hiding the workflow behind an agent framework. This keeps control flow, concurrency, failure handling, and data ownership easy to inspect during a technical review.
 
-## 🎯 What does this system do?
+## Live Demo
 
-The system takes order data (weight, distance, payment lag, etc.) and:
+**[https://gwprojects.switzerlandnorth.cloudapp.azure.com/](https://gwprojects.switzerlandnorth.cloudapp.azure.com/)** - hosted on an Azure VM with HTTPS.
 
-1. **ML Prediction** - XGBoost model predicts delivery time
-2. **RAG Context** - ChromaDB retrieves relevant logistics rules
-3. **Agent Analysis** - 4 specialized AI agents analyze the scenario in parallel
-4. **Decision** - System generates recommendations: voucher, carrier upgrade, customer communication
+The portfolio page is protected with Basic Auth. Its three predefined scenarios call the real ML, RAG, and multi-agent workflow. The displayed processing time, specialist scores, combined quality score, and decision details come from the latest API response rather than hard-coded examples.
 
 ---
 
-## 📐 System Architecture
+## End-to-End Request Flow
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                         OLIST AGENTIC AI SYSTEM                             │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  ┌──────────────┐    ┌──────────────┐    ┌──────────────────────────────┐  │
-│  │   INPUT      │    │   XGBOOST    │    │     CHROMADB RAG             │  │
-│  │  Delivery    │───▶│   Model      │───▶│  ┌────────────────────────┐  │  │
-│  │  Scenario    │    │              │    │  │ Semantic Search        │  │  │
-│  └──────────────┘    └──────────────┘    │  │ all-MiniLM-L6-v2       │  │  │
-│                             │            │  │ 39 Knowledge Chunks    │  │  │
-│                             ▼            │  └────────────────────────┘  │  │
-│                      Predicted Days      └──────────────┬───────────────┘  │
-│                             │                           │                  │
-│                             ▼                           ▼                  │
-│  ┌──────────────────────────────────────────────────────────────────────┐  │
-│  │                    MULTI-AGENT ORCHESTRATION                         │  │
-│  │  ┌─────────────────────────────────────────────────────────────────┐ │  │
-│  │  │                    Ollama + Mistral 7B                          │ │  │
-│  │  │                   (Local LLM Inference)                         │ │  │
-│  │  └─────────────────────────────────────────────────────────────────┘ │  │
-│  │                              │                                       │  │
-│  │        ┌─────────────────────┼─────────────────────┐                 │  │
-│  │        ▼                     ▼                     ▼                 │  │
-│  │  ┌───────────┐        ┌───────────┐        ┌───────────┐             │  │
-│  │  │   RISK    │        │  CARRIER  │        │ RECOVERY  │             │  │
-│  │  │   AGENT   │        │   AGENT   │        │   AGENT   │             │  │
-│  │  │           │        │           │        │           │             │  │
-│  │  │ • Score   │        │ • Upgrade │        │ • Voucher │             │  │
-│  │  │ • Factors │        │ • Cost    │        │ • Timing  │             │  │
-│  │  │ • Priority│        │ • ROI     │        │ • Message │             │  │
-│  │  └─────┬─────┘        └─────┬─────┘        └─────┬─────┘             │  │
-│  │        │                    │                    │                   │  │
-│  │        └────────────────────┼────────────────────┘                   │  │
-│  │                             ▼                                        │  │
-│  │                    ┌─────────────────┐                               │  │
-│  │                    │  ORCHESTRATOR   │                               │  │
-│  │                    │     AGENT       │                               │  │
-│  │                    │                 │                               │  │
-│  │                    │ Executive       │                               │  │
-│  │                    │ Summary +       │                               │  │
-│  │                    │ Confidence      │                               │  │
-│  │                    └─────────────────┘                               │  │
-│  └──────────────────────────────────────────────────────────────────────┘  │
-│                              │                                             │
-│                              ▼                                             │
-│  ┌──────────────────────────────────────────────────────────────────────┐  │
-│  │                      INTEGRATED DECISION                             │  │
-│  │  • Risk Level (HIGH/MODERATE/LOW)    • Carrier Recommendation        │  │
-│  │  • Voucher Code (DELAY15/DELAY50)    • Customer Communication        │  │
-│  │  • ROI Analysis                      • Confidence Score              │  │
-│  └──────────────────────────────────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TD
+    Client[API client] --> Route{FastAPI endpoint}
+    Route --> Validation[Pydantic request validation]
+    Validation -->|POST /analyze or /batch-analyze| Auth[x-api-key verification]
+    Validation -->|POST /demo/analyze| DemoCache{Redis demo-response cache}
+    DemoCache -->|hit| Response[JSON response]
+    DemoCache -->|miss| Preparation
+    Auth --> Preparation
+
+    Preparation[Scenario preparation in asyncio.to_thread]
+    Preparation -->|predicted_days missing| ML[XGBoost prediction]
+    Preparation -->|default RAG context| Chroma[ChromaDB similarity search]
+    ML --> Scenario[DeliveryScenario]
+    Chroma --> Scenario
+    Preparation --> Scenario
+
+    Scenario --> Timeout[Application timeout boundary]
+    Timeout --> RiskRules[Calculate deterministic risk score]
+    RiskRules --> RiskLLM[Agent 1: explain risk]
+    RiskLLM --> Grounding[Normalize and ground risk output]
+    Grounding --> CarrierStart[Agent 2 starts]
+    Grounding --> Recovery[Agent 3: Recovery Strategy]
+
+    CarrierStart --> QuoteTool[Calculate verified carrier quotes]
+    QuoteTool --> CarrierLLM[LLM selects and explains a carrier]
+    CarrierLLM --> Selection[Validate selection or apply fallback]
+    Selection --> Orchestrator[Agent 4: Decision Orchestrator]
+    Recovery --> Orchestrator
+
+    Orchestrator --> Decision[Pydantic IntegratedDecision]
+    Decision --> ResultPath{Calling endpoint}
+    ResultPath -->|/analyze or /demo/analyze| Grader[Deterministic ResponseGrader]
+    ResultPath -->|/batch-analyze| BatchResult[Per-item result]
+
+    Grader --> OutputPath{Calling endpoint}
+    OutputPath -->|/analyze| Audit[Best-effort PostgreSQL audit]
+    OutputPath -->|/demo/analyze| CacheWrite[Redis response cache]
+    Audit --> Response
+    CacheWrite --> Response
+    BatchResult --> Response
 ```
 
----
+The LLM calls made by all four agents use a separate schema-aware Redis cache.
+The detailed cache, concurrency, persistence, and failure paths are documented
+in [ARCHITECTURE_FLOW.md](ARCHITECTURE_FLOW.md).
 
-## 🧠 Multi-Agent Architecture
+### Agent orchestration
 
-The system uses 4 specialized LLM agents (Mistral 7B via Ollama):
+- **Agent 1 - Risk Assessment:** explains the shipment risk, while Python owns the final numerical score and risk level.
+- **Agent 2 - Carrier Optimization:** consumes risk output and deterministic carrier quote data.
+- **Agent 3 - Recovery Strategy:** selects a voucher and customer communication strategy.
+- **Agent 4 - Decision Orchestrator:** integrates the three specialist outputs into a final recommendation and bounded confidence estimate.
+- **ResponseGrader:** scores risk, carrier, and recovery outputs independently; `overall_score` is their arithmetic mean.
 
-| Agent | Responsibility |
-|-------|----------------|
-| **Risk Agent** | Risk assessment (0-100), risk factor identification |
-| **Carrier Agent** | Carrier recommendation, upgrade ROI analysis |
-| **Recovery Agent** | Customer retention strategy, voucher codes |
-| **Orchestrator** | Synthesis of all analyses, executive summary |
-
----
-
-## 🛠️ Tech Stack
-
-- **Python 3.10+**
-- **Ollama + Mistral 7B** - Local LLM (no API keys needed)
-- **ChromaDB** - Vector database for RAG
-- **XGBoost** - Delivery time prediction model (R² = 0.41, room for improvement)
-- **Pydantic** - LLM response type validation
-- **Redis** - Response caching (optional)
-- **Rich** - CLI interface
+Agent 1 runs first because its normalized result is an input to the other specialists. Agents 2 and 3 then run concurrently in a `ThreadPoolExecutor(max_workers=2)`. Agent 4 runs after both futures complete.
 
 ---
 
-## 📦 Installation
+## Deterministic Risk Grounding
 
-```bash
-# Clone repository
-git clone https://github.com/GabrielWalak/Agentic-Logistics-Optimizer.git
-cd Agentic-Logistics-Optimizer
+The LLM may explain the risk, but it cannot invent the authoritative score. Python recalculates it from auditable rules:
 
-# Create virtual environment
-python -m venv .venv
-.venv\Scripts\activate  # Windows
+| Condition | Points |
+|-----------|-------:|
+| Distance over 1,500 km | +20 |
+| Weight over 3,000 g | +15 |
+| Predicted delay over 3 days | +25 |
+| Payment lag over 5 days | +10 |
+| Weekend order | +5 |
 
-# Install dependencies
-pip install pydantic ollama chromadb sentence-transformers xgboost scikit-learn pandas rich python-dotenv
+Risk levels are mapped consistently: `MINIMAL` 0-20, `LOW` 21-40, `MODERATE` 41-60, `HIGH` 61-80, and `CRITICAL` 81-100.
 
-# Pull Mistral model for Ollama
-ollama pull mistral
+If an LLM narrative contradicts the ML prediction, states a different score or level, or introduces unsupported percentages/ranges, the application replaces it with a grounded deterministic explanation.
 
-# Run the system
-python main.py
+---
+
+## State and Storage
+
+| Scope | Implementation | Purpose |
+|-------|----------------|---------|
+| Request state | Pydantic V2 models | Typed inputs and agent outputs |
+| Process state | `AppState` | In-memory request counters, success/error counts, uptime, average latency |
+| Readiness state | `app.state.db_ready` | Refreshed by the live PostgreSQL health probe |
+| Durable audit state | PostgreSQL + SQLModel | Successful authenticated `/analyze` inputs, decisions, model name, and latency |
+| LLM cache | Redis, 1-hour TTL | Reuses structured LLM responses using prompt/model/schema-aware keys |
+| Portfolio response cache | Redis, 10-minute TTL | Reuses a completed response for repeated predefined demo scenarios |
+| Vector state | Persistent ChromaDB | Stores embeddings for six logistics knowledge documents |
+
+Redis is an optimization, not a correctness dependency. A Redis failure disables caching without failing the analysis. The public demo reports both `cache_enabled` and `cache_hit`; a repeated scenario can therefore visibly demonstrate a full-response cache hit.
+
+---
+
+## Concurrency and Failure Handling
+
+- FastAPI keeps its event loop responsive by moving blocking ML, ChromaDB, and orchestration work to worker threads with `asyncio.to_thread`.
+- Agents 2 and 3 run in parallel using `ThreadPoolExecutor`.
+- PostgreSQL operations use async SQLAlchemy/SQLModel sessions.
+- `/batch-analyze` processes batch items sequentially and returns per-item errors; each individual item still uses the parallel specialist stage.
+- LLM calls have request timeouts, bounded retries, and Pydantic structured-output validation.
+- The complete workflow has an application timeout.
+- The public demo returns a typed deterministic fallback when the LLM provider is unavailable; authenticated `/analyze` returns HTTP 503 instead of silently pretending an LLM result succeeded.
+
+---
+
+## Technology Stack
+
+| Layer | Technology |
+|-------|------------|
+| **LLM** | Configurable Gemini model through Google's OpenAI-compatible API |
+| **API** | FastAPI + Pydantic V2 |
+| **Orchestration** | Explicit four-agent Python workflow |
+| **ML** | XGBoost delivery-time regressor |
+| **Knowledge Base** | RAG + persistent ChromaDB vector store |
+| **Typed Tool** | Pydantic carrier quote contract + deterministic rate card |
+| **Database** | PostgreSQL + SQLModel + async SQLAlchemy |
+| **Cache** | Redis LLM cache + predefined demo response cache |
+| **Concurrency** | `asyncio.to_thread` + `ThreadPoolExecutor` for Agents 2-3 |
+| **Observability** | Structured JSON logs + optional LangSmith tracing |
+| **Evaluation** | Deterministic behavioral grading across three specialist outputs |
+| **Infrastructure** | Azure VM + Docker Compose + GitHub Actions |
+| **Security** | API key header, portfolio Basic Auth, environment-based credentials |
+
+---
+
+## Behavioral Grading
+
+Each specialist output receives an independent score from 0 to 100:
+
+- **Risk:** schema, valid level, score-level alignment, measurable factors, and analysis depth.
+- **Carrier:** schema, valid carrier, upgrade/cost consistency, and grounded ROI reasoning.
+- **Recovery:** schema, voucher validity, discount consistency, retention estimate consistency, and communication quality.
+
+The combined quality score is not the orchestrator's confidence:
+
+```text
+overall_score = (risk_score + carrier_score + recovery_score) / 3
 ```
 
----
-
-## 🎮 Usage
-
-### Run full system
-```bash
-python main.py
-```
-
-### Test agent connection
-```bash
-python pydantic_agents.py
-```
+For example, specialist scores `80`, `87`, and `80` produce `82.3/100`. Decision confidence remains a separate, bounded estimate returned by Agent 4.
 
 ---
 
-## 📸 Screenshots
+## API Endpoints
 
-### System startup and initialization
-![System Initialization](screenshots/1.png)
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| `GET` | `/` | Basic Auth | Portfolio page and live scenarios |
+| `POST` | `/analyze` | `x-api-key` | Full analysis with optional automatic ML/RAG preparation |
+| `POST` | `/batch-analyze` | `x-api-key` | Sequential batch with per-item results |
+| `POST` | `/predict` | None | XGBoost delivery-time prediction |
+| `POST` | `/demo/analyze` | None | Three predefined public portfolio scenarios |
+| `GET` | `/health` | None | Live LLM configuration, Redis, PostgreSQL, and ML readiness |
+| `GET` | `/status` | None | In-process runtime metrics |
+| `GET` | `/debug/llm-test` | `x-api-key` | Authenticated provider connectivity probe |
+| `GET` | `/docs` | None | Swagger UI |
 
-### Multi-Agent System scenario analysis
-![Agent Analysis](screenshots/2.png)
+### Abridged demo response
 
-### Final output with recommendations
-![Final Decision](screenshots/3.png)
-
----
-
-## 📁 Project Structure
-
-```
-AgenticAI/
-├── main.py                     # Entry point - workflow orchestration
-├── pydantic_agents.py          # Multi-agent system with Pydantic models
-├── chroma_db_manager.py        # ChromaDB vector database manager
-├── logistics_knowledge_base.py # Domain documents for RAG
-├── logistics_docs/             # Source knowledge files
-│   ├── carrier_rules.txt
-│   ├── customer_recovery.txt
-│   ├── distance_guidelines.txt
-│   └── ...
-└── screenshots/                # Application screenshots
-```
-
----
-
-## 🔧 How it works
-
-### 1. Input
-```python
-scenario = {
-    'product_weight_g': 5000,      # Heavy package
-    'distance_km': 1200.0,         # Long distance
-    'payment_lag_days': 2,         # Payment delay
-    'is_weekend_order': 1,         # Weekend order
-    'freight_value': 85.00         # Freight cost
+```json
+{
+  "scenario": "moderate",
+  "ml_prediction": {
+    "predicted_days": 1.5,
+    "ml_model_used": true
+  },
+  "decision": {
+    "risk_assessment": {
+      "risk_level": "MINIMAL",
+      "risk_score": 0.0,
+      "primary_risk_factors": [
+        "No documented scoring rule triggered"
+      ]
+    },
+    "carrier_recommendation": {
+      "recommended_carrier": "Standard Shipping",
+      "should_upgrade": false
+    },
+    "recovery_plan": {
+      "voucher_code": null,
+      "discount_percentage": 0.0
+    },
+    "confidence_score": 90.0
+  },
+  "grading": {
+    "overall_score": 82.3,
+    "quality_level": "Good",
+    "risk_grading": {"score": 80},
+    "carrier_grading": {"score": 87},
+    "recovery_grading": {"score": 80}
+  },
+  "cache_enabled": true,
+  "cache_hit": false,
+  "processing_time_ms": 6300.0
 }
 ```
 
-### 2. XGBoost Prediction
-Model predicts: **9.2 days** (promised 7 days → DELAY RISK)
-
-### 3. RAG Context
-ChromaDB finds relevant documents:
-- "Distance >800km requires Premium Express"
-- "Weekend orders +1-2 days processing"
-
-### 4. Multi-Agent Analysis
-Agents analyze in parallel and return:
-- **Risk Score**: 85/100 (HIGH)
-- **Carrier**: Upgrade to Premium Express
-- **Voucher**: DELAY50 (50% discount on next order)
-- **Confidence**: 90/100
+Exact LLM wording and latency are non-deterministic. The business-rule score, typed tool values, schema, and grading calculation are deterministic.
 
 ---
 
-## 📄 License
+## ML and RAG Context
 
-MIT License
+The delivery-time model was trained on the **Brazilian E-Commerce (Olist) dataset** (~100k orders, 2016-2018). ChromaDB retrieves context from six local documents covering carrier rules, customer recovery, distance, payment lag, weekends/holidays, and weight.
+
+Known limitations:
+
+- The model does not use live weather, traffic, fleet availability, or holiday surge data.
+- The typed carrier tool uses a deterministic portfolio rate card, not a live carrier API.
+- The tool is a Pydantic-based application contract, not an MCP server. It could be exposed through MCP without changing the agent-facing input/output model.
+- The project uses explicit orchestration rather than LangGraph, CrewAI, or AutoGen.
+- `rate_limit_check` is currently a permissive extension point, not production rate limiting.
 
 ---
 
-<p align="center">
-  <strong>Built with 🤖 Ollama + ChromaDB + XGBoost</strong>
-</p>
+## Local Development
+
+```bash
+git clone https://github.com/GabrielWalak/Agentic-Logistics-Optimizer.git
+cd Agentic-Logistics-Optimizer
+
+cp .env.example .env
+# Set LLM_API_KEY and change the example passwords/secrets.
+
+docker compose up -d --build
+curl http://localhost:8000/health
+```
+
+The LLM provider and model are configured with `LLM_API_KEY`, `LLM_BASE_URL`, and `LLM_MODEL`. The repository defaults target Gemini's OpenAI-compatible endpoint; no GitHub Models token is required.
+
+To run tests in an installed Python environment:
+
+```bash
+python -m pytest -q
+```
+
+The current suite contains 44 tests covering API behavior, deterministic grading, typed tools, LLM retry/structured output handling, and risk-grounding regressions.
+
+---
+
+## CI/CD and Azure Deployment
+
+GitHub Actions performs:
+
+1. targeted `flake8` runtime-safety checks;
+2. the complete pytest suite with PostgreSQL and Redis services;
+3. a Buildx image build and entrypoint validation;
+4. production deployment only after a successful push to `main`.
+
+The deploy job creates an archive from the exact tested Git revision, transfers it to the Azure VM over SSH, builds an immutable image tagged with the commit SHA, starts it with Docker Compose, and verifies `/health`. If the new application does not become healthy, the script attempts to roll back to the previous release. No Azure Container Registry is required.
+
+See [DEPLOYMENT.md](DEPLOYMENT.md) for the one-time Azure and GitHub configuration.
+
+---
+
+## Project Structure
+
+```text
+main.py                       FastAPI routes, state, grading, and demo cache
+pydantic_agents.py            Typed models, LLM client, Redis, and orchestration
+prompt_engineering.py         Canonical prompts and ResponseGrader
+carrier_tools.py              Typed deterministic carrier quote tool
+ml_predictor.py               XGBoost inference
+logistics_knowledge_base.py   RAG document loading and retrieval
+chroma_db_manager.py          Persistent ChromaDB vector store
+models.py                     SQLModel audit table
+database.py                   Async PostgreSQL engine and health checks
+templates/portfolio.py        Server-rendered portfolio and live result UI
+tests/                        Unit, integration, and regression tests
+deploy/                       Azure production Compose and rollback deployment
+.github/workflows/ci.yml      CI, image validation, and Azure deployment
+```

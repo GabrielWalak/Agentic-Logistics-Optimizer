@@ -1,0 +1,5 @@
+invalid type: string "FINANCIAL IMPACT:\n- Each day of payment lag = +0.5 days delivery delay\n- Chargeback cost: R$50-200 per incident + order value\n- Fraud prevention ROI: 400% (cost vs. prevented losses)", expected a booleane (85-90% shipment rate)
+- Fraud rate: 4.5%
+- Chargeback risk: 2-5%
+- Recommendation: Premium Express IF shipping proceeds
+- Customer segment: New customers, payment issues
