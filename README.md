@@ -134,7 +134,7 @@ Redis is an optimization, not a correctness dependency. A Redis failure disables
 | **Concurrency** | `asyncio.to_thread` + `ThreadPoolExecutor` for Agents 2-3 |
 | **Observability** | Structured JSON logs + optional LangSmith tracing |
 | **Evaluation** | Deterministic behavioral grading across three specialist outputs |
-| **Infrastructure** | Azure VM + Docker Compose + GitHub Actions |
+| **Infrastructure** | Oracle Cloud Infrastructure + Docker Compose + GitHub Actions |
 | **Security** | API key header, portfolio Basic Auth, environment-based credentials |
 
 ---
@@ -254,20 +254,17 @@ The current suite contains 44 tests covering API behavior, deterministic grading
 
 ---
 
-## CI/CD and Azure Deployment
+## CI/CD and Deployment
 
-GitHub Actions performs:
+GitHub Actions runs automated continuous integration checks on pushes and pull requests:
 
-1. targeted `flake8` runtime-safety checks;
-2. the complete pytest suite with PostgreSQL and Redis services;
-3. a Buildx image build and entrypoint validation;
-4. production deployment only after a successful push to `main`.
+1. Targeted `flake8` runtime-safety checks.
+2. The complete `pytest` suite with PostgreSQL and Redis services.
+3. Docker Buildx image build and entrypoint validation.
 
-The deploy job creates an archive from the exact tested Git revision, transfers it to the Azure VM over SSH, builds an immutable image tagged with the commit SHA, starts it with Docker Compose, and verifies `/health`. If the new application does not become healthy, the script attempts to roll back to the previous release. No Azure Container Registry is required.
+The application is hosted on an Oracle Cloud Infrastructure (OCI) virtual machine using Docker Compose. Production configuration files and container orchestration assets reside in the `deploy/` directory.
 
-See [DEPLOYMENT.md](DEPLOYMENT.md) for the one-time Azure and GitHub configuration.
-
----
+*Note: Previously, the project featured a fully automated Azure CI/CD pipeline with SSH deployments, container health verification, and automated rollbacks. The infrastructure was subsequently migrated to OCI, shifting GitHub Actions to focus on automated CI validation.*
 
 ## Project Structure
 
@@ -283,6 +280,6 @@ models.py                     SQLModel audit table
 database.py                   Async PostgreSQL engine and health checks
 templates/portfolio.py        Server-rendered portfolio and live result UI
 tests/                        Unit, integration, and regression tests
-deploy/                       Azure production Compose and rollback deployment
-.github/workflows/ci.yml      CI, image validation, and Azure deployment
+deploy/                        Production Docker Compose setup for OCI
+.github/workflows/ci.yml       CI pipeline (linting, pytest, Docker build test)
 ```
