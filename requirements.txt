@@ -1,0 +1,42 @@
+# Core LLM & Data
+openai==2.15.0
+pydantic==2.12.5
+python-dotenv==1.2.1
+
+# Web Framework (FastAPI)
+fastapi==0.104.1
+uvicorn[standard]==0.24.0
+mangum==0.17.0
+
+# Database (PostgreSQL + Async ORM)
+sqlalchemy==2.0.23
+sqlmodel==0.0.14
+asyncpg==0.29.0
+alembic==1.13.0
+
+# Caching & Async
+redis==7.1.0
+
+# ML Model
+xgboost==2.0.3
+scikit-learn==1.3.2
+numpy==1.26.2
+
+# RAG / Vector Store
+chromadb==1.5.9
+
+# Monitoring & Tracing
+langsmith==0.6.8
+
+# HTTP & Utilities
+httpx==0.27.2
+requests==2.31.0
+
+# Testing
+pytest==7.4.3
+pytest-asyncio==0.21.1
+
+# Development (optional)
+black==23.12.0
+flake8==6.1.0
+

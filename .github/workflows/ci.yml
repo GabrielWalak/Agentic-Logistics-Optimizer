@@ -1,0 +1,200 @@
+name: CI/CD
+
+on:
+  push:
+    branches:
+      - main
+      - "feature/**"
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  PYTHON_VERSION: "3.12"
+  IMAGE_REPOSITORY: agentic-logistics
+
+jobs:
+  quality:
+    name: Testy i jakość kodu
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: agentic_user
+          POSTGRES_PASSWORD: agentic_password
+          POSTGRES_DB: logistics_app
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U agentic_user -d logistics_app"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      DATABASE_URL: postgresql+asyncpg://agentic_user:agentic_password@localhost:5432/logistics_app
+      REDIS_URL: redis://localhost:6379/0
+
+    steps:
+      - name: Pobierz kod
+        uses: actions/checkout@v6
+
+      - name: Skonfiguruj Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Zainstaluj zależności
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Sprawdź spójność zależności
+        run: python -m pip check
+
+      - name: Sprawdź migracje PostgreSQL i połączenie z Redis
+        run: |
+          python -m alembic upgrade head
+          python -c "import asyncio; from database import check_database_health; assert asyncio.run(check_database_health())"
+          python -c "import redis; assert redis.Redis.from_url('redis://localhost:6379/0').ping()"
+
+      - name: Sprawdź składnię
+        run: python -m compileall -q . -x '/(\.git|\.venv|chroma_db)/'
+
+      # The repository contains historical formatting that is intentionally not
+      # rewritten in this change. CI still blocks undefined names and invalid
+      # Python constructs, which are the lint failures that can break runtime.
+      - name: Uruchom kontrolę statyczną
+        run: >-
+          python -m flake8 .
+          --exclude=.git,.venv,chroma_db,__pycache__
+          --select=E9,F63,F7,F82
+          --show-source
+          --statistics
+
+      - name: Uruchom testy
+        env:
+          API_KEY: test-api-key-for-ci
+          ENVIRONMENT: testing
+          LLM_API_KEY: test-key-not-used-by-mocked-tests
+          LLM_BASE_URL: https://generativelanguage.googleapis.com/v1beta/openai/
+          LLM_MODEL: gemini-3.6-flash
+        run: python -m pytest -q
+
+  container:
+    name: Walidacja obrazu Docker
+    needs: quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Pobierz kod
+        uses: actions/checkout@v6
+
+      - name: Skonfiguruj Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Zbuduj obraz bez publikowania
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          push: false
+          load: true
+          tags: ${{ env.IMAGE_REPOSITORY }}:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Sprawdź skrypty startowe w obrazie
+        run: >-
+          docker run --rm
+          --entrypoint /bin/bash
+          ${{ env.IMAGE_REPOSITORY }}:ci
+          -n /app/entrypoint.sh
+
+  deploy:
+    name: Wdrożenie na Azure VM
+    needs:
+      - quality
+      - container
+    if: >-
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+      github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+
+    steps:
+      - name: Pobierz kod
+        uses: actions/checkout@v6
+
+      - name: Skonfiguruj bezpieczne połączenie SSH
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.AZURE_VM_SSH_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.AZURE_VM_KNOWN_HOSTS }}
+        run: |
+          set -Eeuo pipefail
+          test -n "$SSH_PRIVATE_KEY"
+          test -n "$SSH_KNOWN_HOSTS"
+          install -d -m 0700 "$HOME/.ssh"
+          printf '%s\n' "$SSH_PRIVATE_KEY" > "$HOME/.ssh/id_ed25519"
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+          chmod 0600 "$HOME/.ssh/id_ed25519" "$HOME/.ssh/known_hosts"
+
+      # git archive includes only files committed in the exact revision that
+      # passed CI, so local caches and secrets can never enter the release.
+      - name: Przygotuj paczkę wydania
+        run: git archive --format=tar.gz --output="$RUNNER_TEMP/release.tar.gz" HEAD
+
+      - name: Prześlij paczkę na VM
+        env:
+          VM_HOST: ${{ secrets.AZURE_VM_HOST }}
+          VM_USER: ${{ secrets.AZURE_VM_USER }}
+          SSH_PORT: ${{ vars.AZURE_VM_SSH_PORT || '22' }}
+        run: |
+          set -Eeuo pipefail
+          test -n "$VM_HOST"
+          test -n "$VM_USER"
+          scp \
+            -P "$SSH_PORT" \
+            -i "$HOME/.ssh/id_ed25519" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            "$RUNNER_TEMP/release.tar.gz" \
+            "$VM_USER@$VM_HOST:/tmp/agentic-logistics-$GITHUB_SHA.tar.gz"
+
+      - name: Zbuduj i wdróż na VM
+        env:
+          VM_HOST: ${{ secrets.AZURE_VM_HOST }}
+          VM_USER: ${{ secrets.AZURE_VM_USER }}
+          SSH_PORT: ${{ vars.AZURE_VM_SSH_PORT || '22' }}
+          DEPLOYMENT_PATH: ${{ vars.AZURE_DEPLOYMENT_PATH }}
+        run: |
+          set -Eeuo pipefail
+          ssh \
+            -p "$SSH_PORT" \
+            -i "$HOME/.ssh/id_ed25519" \
+            -o BatchMode=yes \
+            -o IdentitiesOnly=yes \
+            "$VM_USER@$VM_HOST" \
+            "bash -s -- '$GITHUB_SHA' '$DEPLOYMENT_PATH' '/tmp/agentic-logistics-$GITHUB_SHA.tar.gz'" \
+            < deploy/deploy_azure_vm.sh
