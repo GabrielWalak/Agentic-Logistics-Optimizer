@@ -6,7 +6,7 @@ The project deliberately uses explicit Python orchestration instead of hiding th
 
 ## Live Demo
 
-**[https://gwprojects.tech//](https://gwprojects.tech//)** - hosted on an Oracle with HTTPS.
+**[https://gwprojects.tech/](https://gwprojects.tech/)** - hosted on an Oracle with HTTPS.
 
 The portfolio page is protected with Basic Auth. Its three predefined scenarios call the real ML, RAG, and multi-agent workflow. The displayed processing time, specialist scores, combined quality score, and decision details come from the latest API response rather than hard-coded examples.
 
