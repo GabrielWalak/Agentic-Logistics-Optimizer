@@ -1,27 +1,24 @@
-"""
-ChromaDB Manager for OLIST Logistics RAG System
-Enterprise-grade vector database management with Ollama embeddings
-"""
-import os
+"""Persistent ChromaDB manager for the local logistics knowledge base."""
 import chromadb
+from chromadb.api.types import Embeddable, EmbeddingFunction, Where
 from chromadb.config import Settings
-from chromadb.utils import embedding_functions
-import ollama
-from typing import List, Dict, Optional
-from logistics_knowledge_base import LOGISTICS_DOCUMENTS, create_knowledge_base
+from chromadb.errors import NotFoundError
+from chromadb.utils.embedding_functions import DefaultEmbeddingFunction
+from typing import List, Dict, Optional, cast
+from logistics_knowledge_base import LOGISTICS_DOCUMENTS
 
 
 class ChromaDBManager:
     """
     Manages ChromaDB operations for logistics knowledge base
-    Uses Ollama mxbai-embed-large for embeddings (1024-dimensional)
+    Uses ChromaDB's default local embedding function.
     """
     
     def __init__(
         self, 
         persist_directory: str = "./chroma_db",
-        collection_name: str = "olist_logistics_knowledge",
-        embedding_model: str = "all-MiniLM-L6-v2"
+        collection_name: str = "olist_logistics_knowledge_v2",
+        embedding_model: str = "chroma-default"
     ):
         """
         Initialize ChromaDB with persistent storage
@@ -34,7 +31,14 @@ class ChromaDBManager:
         self.persist_directory = persist_directory
         self.collection_name = collection_name
         self.embedding_model = embedding_model
-        
+        # This manager only sends text documents. Chroma's collection API uses
+        # the wider Embeddable union, while its default implementation is typed
+        # for Documents. The cast documents that safe text-only boundary.
+        self.embedding_function = cast(
+            EmbeddingFunction[Embeddable],
+            DefaultEmbeddingFunction(),
+        )
+
         # Initialize ChromaDB client with persistent storage
         self.client = chromadb.PersistentClient(
             path=persist_directory,
@@ -52,23 +56,19 @@ class ChromaDBManager:
         try:
             # Try to get existing collection
             collection = self.client.get_collection(
-                name=self.collection_name
+                name=self.collection_name,
+                embedding_function=self.embedding_function,
             )
-            print(f"✓ Loaded existing collection: {self.collection_name}")
+            print(f"Loaded existing collection: {self.collection_name}")
             return collection
-        except Exception:
-            # Create new collection with sentence transformers
-            print(f"✓ Creating new collection: {self.collection_name}")
-            
-            # Use sentence transformers (lightweight, no Ollama needed)
-            embedding_fn = embedding_functions.SentenceTransformerEmbeddingFunction(
-                model_name=self.embedding_model
-            )
+        except NotFoundError:
+            # Create new collection with default embeddings (no torch needed)
+            print(f"Creating new collection: {self.collection_name}")
             
             collection = self.client.create_collection(
                 name=self.collection_name,
-                embedding_function=embedding_fn,
-                metadata={"description": "OLIST Logistics Knowledge Base"}
+                metadata={"description": "OLIST Logistics Knowledge Base"},
+                embedding_function=self.embedding_function,
             )
             return collection
     
@@ -85,13 +85,13 @@ class ChromaDBManager:
         
         # Check if already indexed
         if self.collection.count() > 0 and not force_reindex:
-            print(f"✓ Collection already indexed ({self.collection.count()} documents)")
+            print(
+                f"Collection already indexed "
+                f"({self.collection.count()} documents)"
+            )
             return
         
-        print("📚 Indexing knowledge base into ChromaDB...")
-        
-        # Create knowledge base files
-        create_knowledge_base()
+        print("Indexing knowledge base into ChromaDB...")
         
         documents = []
         metadatas = []
@@ -120,9 +120,9 @@ class ChromaDBManager:
                 metadatas=metadatas,
                 ids=ids
             )
-            print(f"✓ Indexed {len(documents)} document chunks")
+            print(f"Indexed {len(documents)} document chunks")
         else:
-            print("⚠ No documents to index")
+            print("No documents to index")
     
     def _split_document(self, content: str, filename: str) -> List[str]:
         """
@@ -181,7 +181,9 @@ class ChromaDBManager:
         Returns:
             Query results with documents and metadata
         """
-        where_filter = {"category": filter_category} if filter_category else None
+        where_filter: Optional[Where] = None
+        if filter_category is not None:
+            where_filter = {"category": filter_category}
         
         results = self.collection.query(
             query_texts=[query_text],
@@ -266,7 +268,7 @@ class ChromaDBManager:
     def reset_database(self):
         """Reset the entire database (use with caution)"""
         self.client.delete_collection(name=self.collection_name)
-        print("✓ Database reset complete")
+        print("Database reset complete")
     
     def get_stats(self) -> Dict:
         """Get collection statistics"""
@@ -281,19 +283,18 @@ class ChromaDBManager:
 
 # Test functionality
 if __name__ == "__main__":
-    print("🔧 Initializing ChromaDB Manager...")
+    print("Initializing ChromaDB Manager...")
     
     manager = ChromaDBManager()
     
-    print("\n📊 Indexing knowledge base...")
+    print("\nIndexing knowledge base...")
     manager.index_knowledge_base(force_reindex=False)
-    
-    print("\n📈 Database Stats:")
+    print("\nDatabase Stats:")
     stats = manager.get_stats()
     for key, value in stats.items():
         print(f"  {key}: {value}")
     
-    print("\n🔍 Testing query...")
+    print("\nTesting query...")
     test_query = "What carrier should I use for heavy packages over 5kg?"
     results = manager.query(test_query, n_results=3)
     
@@ -303,4 +304,4 @@ if __name__ == "__main__":
         print(f"\n--- Result {i+1} ---")
         print(doc[:200] + "...")
     
-    print("\n✓ ChromaDB Manager test complete!")
+    print("\nChromaDB Manager test complete!")
