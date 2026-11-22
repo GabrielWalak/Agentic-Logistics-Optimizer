@@ -15,6 +15,85 @@ from carrier_tools import (
 )
 
 
+@pytest.mark.parametrize(
+    ("field", "at_threshold", "above_threshold", "points"),
+    [
+        ("distance_km", 1500, 1501, 20),
+        ("weight_g", 3000, 3001, 15),
+        ("payment_lag_days", 5, 6, 10),
+    ],
+)
+def test_risk_rules_trigger_only_above_threshold(
+    field,
+    at_threshold,
+    above_threshold,
+    points,
+):
+    base = {
+        "predicted_days": 5,
+        "promised_days": 5,
+        "distance_km": 100,
+        "weight_g": 1000,
+        "payment_lag_days": 0,
+        "is_weekend_order": 0,
+        "freight_value": 25,
+        "rag_context": "Standard regional delivery rules.",
+    }
+
+    at_scenario = agents.DeliveryScenario(**{**base, field: at_threshold})
+    above_scenario = agents.DeliveryScenario(**{**base, field: above_threshold})
+
+    assert agents.calculate_risk_score(at_scenario) == 0
+    assert agents.calculate_risk_score(above_scenario) == points
+
+
+def test_delay_rule_triggers_only_more_than_three_days():
+    base = {
+        "distance_km": 100,
+        "weight_g": 1000,
+        "payment_lag_days": 0,
+        "is_weekend_order": 0,
+        "freight_value": 25,
+        "rag_context": "Standard regional delivery rules.",
+    }
+
+    on_threshold = agents.DeliveryScenario(
+        predicted_days=8,
+        promised_days=5,
+        **base,
+    )
+    above_threshold = agents.DeliveryScenario(
+        predicted_days=8.1,
+        promised_days=5,
+        **base,
+    )
+
+    assert agents.calculate_risk_score(on_threshold) == 0
+    assert agents.calculate_risk_score(above_threshold) == 25
+
+
+@pytest.mark.parametrize(
+    ("score", "expected_level"),
+    [
+        (0, "MINIMAL"),
+        (20, "MINIMAL"),
+        (21, "LOW"),
+        (40, "LOW"),
+        (41, "MODERATE"),
+        (60, "MODERATE"),
+        (61, "HIGH"),
+        (80, "HIGH"),
+        (81, "CRITICAL"),
+        (100, "CRITICAL"),
+    ],
+)
+def test_risk_level_boundaries_are_documented(
+    score,
+    expected_level,
+):
+    assert agents.risk_level_from_score(score) == expected_level
+
+
 def test_quote_is_deterministic_and_typed():
     tool_input = CarrierQuoteInput(
         carrier="Premium Express",

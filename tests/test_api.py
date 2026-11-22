@@ -239,6 +239,16 @@ class TestAnalyzeEndpoint:
 class TestBatchAnalyzeEndpoint:
     """Verify batch processing applies the same ML and RAG preparation."""
 
+    def test_batch_rejects_empty_request_list(self):
+        response = client.post(
+            "/batch-analyze",
+            json=[],
+            headers={"x-api-key": API_KEY},
+        )
+
+        assert response.status_code == 400
+        assert response.json()["detail"] == "Empty request list"
+
     @patch("main._get_rag_context", return_value="Retrieved carrier rules")
     @patch("main.predict_delivery_days", return_value=6.2)
     @patch("main.run_multi_agent_analysis_parallel")
@@ -269,6 +279,38 @@ class TestBatchAnalyzeEndpoint:
         assert scenario.rag_context == "Retrieved carrier rules"
         mock_predict.assert_called_once()
         mock_rag.assert_called_once()
+
+    @patch("main._prepare_analysis_scenario")
+    @patch("main._run_analysis_with_timeout", new_callable=AsyncMock)
+    def test_batch_keeps_successes_when_one_item_fails(
+        self,
+        mock_run_analysis,
+        mock_prepare_scenario,
+    ):
+        first_decision = MagicMock()
+        first_decision.model_dump.return_value = {"status": "ok"}
+        mock_prepare_scenario.side_effect = [MagicMock(), MagicMock()]
+        mock_run_analysis.side_effect = [
+            first_decision,
+            LLMError("Provider unavailable"),
+        ]
+
+        response = client.post(
+            "/batch-analyze",
+            json=[
+                {"distance_km": 400, "weight_g": 1000, "freight_value": 30},
+                {"distance_km": 900, "weight_g": 1800, "freight_value": 55},
+            ],
+            headers={"x-api-key": API_KEY},
+        )
+
+        data = response.json()
+        assert response.status_code == 200
+        assert data["status"] == "completed_with_errors"
+        assert data["successful"] == 1
+        assert data["failed"] == 1
+        assert data["results"][0] == {"status": "ok"}
+        assert data["results"][1]["error_type"] == "LLMError"
 
 
 class TestDemoEndpoint:

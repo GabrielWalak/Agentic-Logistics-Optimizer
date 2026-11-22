@@ -4,6 +4,10 @@ A portfolio implementation of a logistics decision-support workflow. The API com
 
 The project deliberately uses explicit Python orchestration instead of hiding the workflow behind an agent framework. This keeps control flow, concurrency, failure handling, and data ownership easy to inspect during a technical review.
 
+For the course submission, see the Polish [case study](STUDIUM_PRZYPADKU.md),
+which collects the system description, quality requirements, acceptance
+criteria, risk register, test plan, and verified test results.
+
 ## Live Demo
 
 **[https://gwprojects.switzerlandnorth.cloudapp.azure.com/](https://gwprojects.switzerlandnorth.cloudapp.azure.com/)** - hosted on an Azure VM with HTTPS.
@@ -250,7 +254,7 @@ To run tests in an installed Python environment:
 python -m pytest -q
 ```
 
-The current suite contains 44 tests covering API behavior, deterministic grading, typed tools, LLM retry/structured output handling, and risk-grounding regressions.
+The current suite contains 60 tests covering API behavior, deterministic grading, typed tools, LLM retry/structured output handling, batch processing, and risk-grounding regressions.
 
 ---
 
